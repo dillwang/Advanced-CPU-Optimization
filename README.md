@@ -7,5 +7,5 @@ Here are some potential optimization methods that we are considering:
 - Cache optimizations
 - Superscalar execution
 - Hardware prefetching
-- Multithreading
+- Multicore execution
 - Runahead execution
