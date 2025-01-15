@@ -1,0 +1,215 @@
+
+quickSort.out:     file format elf32-tradbigmips
+
+
+Disassembly of section .text:
+
+00000000 <_ftext>:
+   0:	24000000 	li	zero,0
+   4:	24010000 	li	at,0
+   8:	24020000 	li	v0,0
+   c:	24030000 	li	v1,0
+  10:	24040000 	li	a0,0
+  14:	24050000 	li	a1,0
+  18:	24060000 	li	a2,0
+  1c:	24070000 	li	a3,0
+  20:	24080000 	li	t0,0
+  24:	24090000 	li	t1,0
+  28:	240a0000 	li	t2,0
+  2c:	240b0000 	li	t3,0
+  30:	240c0000 	li	t4,0
+  34:	240d0000 	li	t5,0
+  38:	240e0000 	li	t6,0
+  3c:	240f0000 	li	t7,0
+  40:	24100000 	li	s0,0
+  44:	24110000 	li	s1,0
+  48:	24120000 	li	s2,0
+  4c:	24130000 	li	s3,0
+  50:	24140000 	li	s4,0
+  54:	24150000 	li	s5,0
+  58:	24160000 	li	s6,0
+  5c:	24170000 	li	s7,0
+  60:	24180000 	li	t8,0
+  64:	24190000 	li	t9,0
+  68:	241a0000 	li	k0,0
+  6c:	241b0000 	li	k1,0
+  70:	241c0000 	li	gp,0
+  74:	241d0000 	li	sp,0
+  78:	241e0000 	li	s8,0
+  7c:	241f0000 	li	ra,0
+  80:	0c00009a 	jal	268 <begin>
+  84:	3c1d0010 	lui	sp,0x10
+  88:	0380e025 	move	gp,gp
+  8c:	409cb800 	mtc0	gp,$23
+  90:	00000000 	nop
+  94:	409cc800 	mtc0	gp,$25
+  98:	08000026 	j	98 <_ftext+0x98>
+  9c:	00000000 	nop
+  a0:	00000000 	nop
+  a4:	00000000 	nop
+  a8:	00000000 	nop
+  ac:	00000000 	nop
+
+000000b0 <quickSort>:
+  b0:	00003825 	move	a3,zero
+  b4:	24a2ffff 	addiu	v0,a1,-1
+  b8:	27bde0c0 	addiu	sp,sp,-8000
+  bc:	00e2182a 	slt	v1,a3,v0
+  c0:	00007025 	move	t6,zero
+  c4:	afa00fa0 	sw	zero,4000(sp)
+  c8:	afa50000 	sw	a1,0(sp)
+  cc:	240fffff 	li	t7,-1
+  d0:	1460000c 	bnez	v1,104 <quickSort+0x54>
+  d4:	241803e7 	li	t8,999
+  d8:	25ceffff 	addiu	t6,t6,-1
+  dc:	11cf005c 	beq	t6,t7,250 <quickSort+0x1a0>
+  e0:	000e1080 	sll	v0,t6,0x2
+  e4:	03a21821 	addu	v1,sp,v0
+  e8:	03a21021 	addu	v0,sp,v0
+  ec:	8c670fa0 	lw	a3,4000(v1)
+  f0:	8c450000 	lw	a1,0(v0)
+  f4:	24a2ffff 	addiu	v0,a1,-1
+  f8:	00e2182a 	slt	v1,a3,v0
+  fc:	1060fff6 	beqz	v1,d8 <quickSort+0x28>
+ 100:	00000000 	nop
+ 104:	00074880 	sll	t1,a3,0x2
+ 108:	00891821 	addu	v1,a0,t1
+ 10c:	11d80053 	beq	t6,t8,25c <quickSort+0x1ac>
+ 110:	8c6b0000 	lw	t3,0(v1)
+ 114:	00021880 	sll	v1,v0,0x2
+ 118:	00835021 	addu	t2,a0,v1
+ 11c:	8d460000 	lw	a2,0(t2)
+ 120:	00cb402a 	slt	t0,a2,t3
+ 124:	1500000d 	bnez	t0,15c <quickSort+0xac>
+ 128:	00000000 	nop
+ 12c:	00e2302a 	slt	a2,a3,v0
+ 130:	10c00030 	beqz	a2,1f4 <quickSort+0x144>
+ 134:	2463fffc 	addiu	v1,v1,-4
+ 138:	10000003 	b	148 <quickSort+0x98>
+ 13c:	00831821 	addu	v1,a0,v1
+ 140:	1047002b 	beq	v0,a3,1f0 <quickSort+0x140>
+ 144:	2463fffc 	addiu	v1,v1,-4
+ 148:	8c660000 	lw	a2,0(v1)
+ 14c:	2442ffff 	addiu	v0,v0,-1
+ 150:	00cb402a 	slt	t0,a2,t3
+ 154:	1100fffa 	beqz	t0,140 <quickSort+0x90>
+ 158:	00605025 	move	t2,v1
+ 15c:	00e2182a 	slt	v1,a3,v0
+ 160:	00896821 	addu	t5,a0,t1
+ 164:	10600026 	beqz	v1,200 <quickSort+0x150>
+ 168:	24ec0001 	addiu	t4,a3,1
+ 16c:	25290004 	addiu	t1,t1,4
+ 170:	ada60000 	sw	a2,0(t5)
+ 174:	24e80002 	addiu	t0,a3,2
+ 178:	0182302a 	slt	a2,t4,v0
+ 17c:	01803825 	move	a3,t4
+ 180:	00896821 	addu	t5,a0,t1
+ 184:	8da90000 	lw	t1,0(t5)
+ 188:	0169182a 	slt	v1,t3,t1
+ 18c:	14600011 	bnez	v1,1d4 <quickSort+0x124>
+ 190:	00000000 	nop
+ 194:	10c0001e 	beqz	a2,210 <quickSort+0x160>
+ 198:	24e60001 	addiu	a2,a3,1
+ 19c:	00061880 	sll	v1,a2,0x2
+ 1a0:	10000004 	b	1b4 <quickSort+0x104>
+ 1a4:	00831821 	addu	v1,a0,v1
+ 1a8:	10c2001a 	beq	a2,v0,214 <quickSort+0x164>
+ 1ac:	24630004 	addiu	v1,v1,4
+ 1b0:	24c60001 	addiu	a2,a2,1
+ 1b4:	8c690000 	lw	t1,0(v1)
+ 1b8:	00e04025 	move	t0,a3
+ 1bc:	0169602a 	slt	t4,t3,t1
+ 1c0:	00c03825 	move	a3,a2
+ 1c4:	00606825 	move	t5,v1
+ 1c8:	1180fff7 	beqz	t4,1a8 <quickSort+0xf8>
+ 1cc:	25080002 	addiu	t0,t0,2
+ 1d0:	00e2302a 	slt	a2,a3,v0
+ 1d4:	10c0000e 	beqz	a2,210 <quickSort+0x160>
+ 1d8:	2442ffff 	addiu	v0,v0,-1
+ 1dc:	00e2302a 	slt	a2,a3,v0
+ 1e0:	10c0000b 	beqz	a2,210 <quickSort+0x160>
+ 1e4:	ad490000 	sw	t1,0(t2)
+ 1e8:	1000ffca 	b	114 <quickSort+0x64>
+ 1ec:	00074880 	sll	t1,a3,0x2
+ 1f0:	00003025 	move	a2,zero
+ 1f4:	00896821 	addu	t5,a0,t1
+ 1f8:	1000ffe2 	b	184 <quickSort+0xd4>
+ 1fc:	24e80001 	addiu	t0,a3,1
+ 200:	8da90000 	lw	t1,0(t5)
+ 204:	0169182a 	slt	v1,t3,t1
+ 208:	1460fff1 	bnez	v1,1d0 <quickSort+0x120>
+ 20c:	01804025 	move	t0,t4
+ 210:	00e01025 	move	v0,a3
+ 214:	25c90001 	addiu	t1,t6,1
+ 218:	00091880 	sll	v1,t1,0x2
+ 21c:	000e3080 	sll	a2,t6,0x2
+ 220:	03a35021 	addu	t2,sp,v1
+ 224:	03a63021 	addu	a2,sp,a2
+ 228:	ad450000 	sw	a1,0(t2)
+ 22c:	acc20000 	sw	v0,0(a2)
+ 230:	00601025 	move	v0,v1
+ 234:	03a21021 	addu	v0,sp,v0
+ 238:	8c450000 	lw	a1,0(v0)
+ 23c:	01003825 	move	a3,t0
+ 240:	adab0000 	sw	t3,0(t5)
+ 244:	ad480fa0 	sw	t0,4000(t2)
+ 248:	1000ffaa 	b	f4 <quickSort+0x44>
+ 24c:	01207025 	move	t6,t1
+ 250:	24020001 	li	v0,1
+ 254:	03e00008 	jr	ra
+ 258:	27bd1f40 	addiu	sp,sp,8000
+ 25c:	00001025 	move	v0,zero
+ 260:	03e00008 	jr	ra
+ 264:	27bd1f40 	addiu	sp,sp,8000
+
+00000268 <begin>:
+ 268:	3c040000 	lui	a0,0x0
+ 26c:	24990330 	addiu	t9,a0,816
+ 270:	3c020001 	lui	v0,0x1
+ 274:	03221021 	addu	v0,t9,v0
+ 278:	8c439c40 	lw	v1,-25536(v0)
+ 27c:	27bdffe8 	addiu	sp,sp,-24
+ 280:	3402a414 	li	v0,0xa414
+ 284:	1062000e 	beq	v1,v0,2c0 <begin+0x58>
+ 288:	afbf0014 	sw	ra,20(sp)
+ 28c:	24020001 	li	v0,1
+ 290:	4082c000 	mtc0	v0,$24
+ 294:	24054e20 	li	a1,20000
+ 298:	0c00002c 	jal	b0 <quickSort>
+ 29c:	24840330 	addiu	a0,a0,816
+ 2a0:	8f220030 	lw	v0,48(t9)
+ 2a4:	24030029 	li	v1,41
+ 2a8:	1043000e 	beq	v0,v1,2e4 <begin+0x7c>
+ 2ac:	00000000 	nop
+ 2b0:	4082c000 	mtc0	v0,$24
+ 2b4:	8fbf0014 	lw	ra,20(sp)
+ 2b8:	03e00008 	jr	ra
+ 2bc:	27bd0018 	addiu	sp,sp,24
+ 2c0:	24020001 	li	v0,1
+ 2c4:	4082b800 	mtc0	v0,$23
+ 2c8:	24054e20 	li	a1,20000
+ 2cc:	0c00002c 	jal	b0 <quickSort>
+ 2d0:	24840330 	addiu	a0,a0,816
+ 2d4:	8f220030 	lw	v0,48(t9)
+ 2d8:	24030029 	li	v1,41
+ 2dc:	1443fff4 	bne	v0,v1,2b0 <begin+0x48>
+ 2e0:	00000000 	nop
+ 2e4:	4082c800 	mtc0	v0,$25
+ 2e8:	8fbf0014 	lw	ra,20(sp)
+ 2ec:	03e00008 	jr	ra
+ 2f0:	27bd0018 	addiu	sp,sp,24
+ 2f4:	00000000 	nop
+ 2f8:	00000000 	nop
+ 2fc:	00000000 	nop
+ 300:	00000000 	nop
+ 304:	00000000 	nop
+ 308:	00000000 	nop
+ 30c:	00000000 	nop
+ 310:	00000000 	nop
+ 314:	00000000 	nop
+ 318:	00000000 	nop
+ 31c:	00000000 	nop
+ 320:	00000000 	nop
+ 324:	00000000 	nop
+ 328:	00000000 	nop
+ 32c:	00000000 	nop

@@ -1,0 +1,113 @@
+
+esift2.out:     file format elf32-tradbigmips
+
+
+Disassembly of section .text:
+
+00000000 <_ftext>:
+   0:	24000000 	li	zero,0
+   4:	24010000 	li	at,0
+   8:	24020000 	li	v0,0
+   c:	24030000 	li	v1,0
+  10:	24040000 	li	a0,0
+  14:	24050000 	li	a1,0
+  18:	24060000 	li	a2,0
+  1c:	24070000 	li	a3,0
+  20:	24080000 	li	t0,0
+  24:	24090000 	li	t1,0
+  28:	240a0000 	li	t2,0
+  2c:	240b0000 	li	t3,0
+  30:	240c0000 	li	t4,0
+  34:	240d0000 	li	t5,0
+  38:	240e0000 	li	t6,0
+  3c:	240f0000 	li	t7,0
+  40:	24100000 	li	s0,0
+  44:	24110000 	li	s1,0
+  48:	24120000 	li	s2,0
+  4c:	24130000 	li	s3,0
+  50:	24140000 	li	s4,0
+  54:	24150000 	li	s5,0
+  58:	24160000 	li	s6,0
+  5c:	24170000 	li	s7,0
+  60:	24180000 	li	t8,0
+  64:	24190000 	li	t9,0
+  68:	241a0000 	li	k0,0
+  6c:	241b0000 	li	k1,0
+  70:	241c0000 	li	gp,0
+  74:	241d0000 	li	sp,0
+  78:	241e0000 	li	s8,0
+  7c:	241f0000 	li	ra,0
+  80:	0c00002c 	jal	b0 <begin>
+  84:	3c1d0010 	lui	sp,0x10
+  88:	0380e025 	move	gp,gp
+  8c:	409cb800 	mtc0	gp,$23
+  90:	00000000 	nop
+  94:	409cc800 	mtc0	gp,$25
+  98:	08000026 	j	98 <_ftext+0x98>
+  9c:	00000000 	nop
+  a0:	00000000 	nop
+  a4:	00000000 	nop
+  a8:	00000000 	nop
+  ac:	00000000 	nop
+
+000000b0 <begin>:
+  b0:	27bdcf18 	addiu	sp,sp,-12520
+  b4:	27a230e0 	addiu	v0,sp,12512
+  b8:	afbd30e0 	sw	sp,12512(sp)
+  bc:	8fa330e0 	lw	v1,12512(sp)
+  c0:	ac600000 	sw	zero,0(v1)
+  c4:	24630004 	addiu	v1,v1,4
+  c8:	1443fffc 	bne	v0,v1,bc <begin+0xc>
+  cc:	afa330e0 	sw	v1,12512(sp)
+  d0:	3c080003 	lui	t0,0x3
+  d4:	24070003 	li	a3,3
+  d8:	24090001 	li	t1,1
+  dc:	25080d41 	addiu	t0,t0,3393
+  e0:	240a01c3 	li	t2,451
+  e4:	00071840 	sll	v1,a3,0x1
+  e8:	00031182 	srl	v0,v1,0x6
+  ec:	24420001 	addiu	v0,v0,1
+  f0:	00032042 	srl	a0,v1,0x1
+  f4:	00021080 	sll	v0,v0,0x2
+  f8:	30660001 	andi	a2,v1,0x1
+  fc:	00671821 	addu	v1,v1,a3
+ 100:	03a21021 	addu	v0,sp,v0
+ 104:	00892004 	sllv	a0,t1,a0
+ 108:	10c00004 	beqz	a2,11c <begin+0x6c>
+ 10c:	0068282b 	sltu	a1,v1,t0
+ 110:	8c460000 	lw	a2,0(v0)
+ 114:	00862025 	or	a0,a0,a2
+ 118:	ac440000 	sw	a0,0(v0)
+ 11c:	14a0fff3 	bnez	a1,ec <begin+0x3c>
+ 120:	00031182 	srl	v0,v1,0x6
+ 124:	24e70002 	addiu	a3,a3,2
+ 128:	14eaffef 	bne	a3,t2,e8 <begin+0x38>
+ 12c:	00071840 	sll	v1,a3,0x1
+ 130:	3c060003 	lui	a2,0x3
+ 134:	24070001 	li	a3,1
+ 138:	24040003 	li	a0,3
+ 13c:	24080001 	li	t0,1
+ 140:	24c60d41 	addiu	a2,a2,3393
+ 144:	00041182 	srl	v0,a0,0x6
+ 148:	24420001 	addiu	v0,v0,1
+ 14c:	00021080 	sll	v0,v0,0x2
+ 150:	03a21021 	addu	v0,sp,v0
+ 154:	8c450000 	lw	a1,0(v0)
+ 158:	00041842 	srl	v1,a0,0x1
+ 15c:	00681004 	sllv	v0,t0,v1
+ 160:	00451024 	and	v0,v0,a1
+ 164:	14400002 	bnez	v0,170 <begin+0xc0>
+ 168:	24840002 	addiu	a0,a0,2
+ 16c:	24e70001 	addiu	a3,a3,1
+ 170:	1486fff5 	bne	a0,a2,148 <begin+0x98>
+ 174:	00041182 	srl	v0,a0,0x6
+ 178:	24024640 	li	v0,17984
+ 17c:	10e20004 	beq	a3,v0,190 <begin+0xe0>
+ 180:	24020001 	li	v0,1
+ 184:	4082c000 	mtc0	v0,$24
+ 188:	03e00008 	jr	ra
+ 18c:	27bd30e8 	addiu	sp,sp,12520
+ 190:	4082c800 	mtc0	v0,$25
+ 194:	03e00008 	jr	ra
+ 198:	27bd30e8 	addiu	sp,sp,12520
+ 19c:	00000000 	nop

@@ -1,0 +1,1107 @@
+
+queens.out:     file format elf32-tradbigmips
+
+
+Disassembly of section .text:
+
+00000000 <_ftext>:
+       0:	24000000 	li	zero,0
+       4:	24010000 	li	at,0
+       8:	24020000 	li	v0,0
+       c:	24030000 	li	v1,0
+      10:	24040000 	li	a0,0
+      14:	24050000 	li	a1,0
+      18:	24060000 	li	a2,0
+      1c:	24070000 	li	a3,0
+      20:	24080000 	li	t0,0
+      24:	24090000 	li	t1,0
+      28:	240a0000 	li	t2,0
+      2c:	240b0000 	li	t3,0
+      30:	240c0000 	li	t4,0
+      34:	240d0000 	li	t5,0
+      38:	240e0000 	li	t6,0
+      3c:	240f0000 	li	t7,0
+      40:	24100000 	li	s0,0
+      44:	24110000 	li	s1,0
+      48:	24120000 	li	s2,0
+      4c:	24130000 	li	s3,0
+      50:	24140000 	li	s4,0
+      54:	24150000 	li	s5,0
+      58:	24160000 	li	s6,0
+      5c:	24170000 	li	s7,0
+      60:	24180000 	li	t8,0
+      64:	24190000 	li	t9,0
+      68:	241a0000 	li	k0,0
+      6c:	241b0000 	li	k1,0
+      70:	241c0000 	li	gp,0
+      74:	241d0000 	li	sp,0
+      78:	241e0000 	li	s8,0
+      7c:	241f0000 	li	ra,0
+      80:	0c0002be 	jal	af8 <begin>
+      84:	3c1d0010 	lui	sp,0x10
+      88:	0380e025 	move	gp,gp
+      8c:	409cb800 	mtc0	gp,$23
+      90:	00000000 	nop
+      94:	409cc800 	mtc0	gp,$25
+      98:	08000026 	j	98 <_ftext+0x98>
+      9c:	00000000 	nop
+      a0:	00000000 	nop
+      a4:	00000000 	nop
+      a8:	00000000 	nop
+      ac:	00000000 	nop
+
+000000b0 <SolveProblem.constprop.0>:
+      b0:	27bdfb20 	addiu	sp,sp,-1248
+      b4:	27a204b0 	addiu	v0,sp,1200
+      b8:	afbe04dc 	sw	s8,1244(sp)
+      bc:	afb704d8 	sw	s7,1240(sp)
+      c0:	afb604d4 	sw	s6,1236(sp)
+      c4:	afb504d0 	sw	s5,1232(sp)
+      c8:	afb404cc 	sw	s4,1228(sp)
+      cc:	afb304c8 	sw	s3,1224(sp)
+      d0:	afb204c4 	sw	s2,1220(sp)
+      d4:	afb104c0 	sw	s1,1216(sp)
+      d8:	afb004bc 	sw	s0,1212(sp)
+      dc:	afbd04b0 	sw	sp,1200(sp)
+      e0:	8fa304b0 	lw	v1,1200(sp)
+      e4:	ac600000 	sw	zero,0(v1)
+      e8:	ac600004 	sw	zero,4(v1)
+      ec:	ac600008 	sw	zero,8(v1)
+      f0:	2463000c 	addiu	v1,v1,12
+      f4:	1443fffa 	bne	v0,v1,e0 <SolveProblem.constprop.0+0x30>
+      f8:	afa304b0 	sw	v1,1200(sp)
+      fc:	3c020000 	lui	v0,0x0
+     100:	244e1130 	addiu	t6,v0,4400
+     104:	ac401130 	sw	zero,4400(v0)
+     108:	24020008 	li	v0,8
+     10c:	adc20004 	sw	v0,4(t6)
+     110:	24020007 	li	v0,7
+     114:	adc2000c 	sw	v0,12(t6)
+     118:	24020006 	li	v0,6
+     11c:	adc20014 	sw	v0,20(t6)
+     120:	24020005 	li	v0,5
+     124:	adc2001c 	sw	v0,28(t6)
+     128:	24020004 	li	v0,4
+     12c:	adc20024 	sw	v0,36(t6)
+     130:	24020003 	li	v0,3
+     134:	adc2002c 	sw	v0,44(t6)
+     138:	24020002 	li	v0,2
+     13c:	adc20034 	sw	v0,52(t6)
+     140:	3c0d0000 	lui	t5,0x0
+     144:	24020001 	li	v0,1
+     148:	3c090000 	lui	t1,0x0
+     14c:	adc2003c 	sw	v0,60(t6)
+     150:	adc00008 	sw	zero,8(t6)
+     154:	adc00010 	sw	zero,16(t6)
+     158:	adc00018 	sw	zero,24(t6)
+     15c:	adc00020 	sw	zero,32(t6)
+     160:	adc00028 	sw	zero,40(t6)
+     164:	adc00030 	sw	zero,48(t6)
+     168:	adc00038 	sw	zero,56(t6)
+     16c:	adc00040 	sw	zero,64(t6)
+     170:	adc00044 	sw	zero,68(t6)
+     174:	0000c825 	move	t9,zero
+     178:	240f0008 	li	t7,8
+     17c:	00002825 	move	a1,zero
+     180:	00001825 	move	v1,zero
+     184:	25ad1170 	addiu	t5,t5,4464
+     188:	240b0007 	li	t3,7
+     18c:	2402ffff 	li	v0,-1
+     190:	252913b8 	addiu	t1,t1,5048
+     194:	240c0001 	li	t4,1
+     198:	24180008 	li	t8,8
+     19c:	240affff 	li	t2,-1
+     1a0:	24100011 	li	s0,17
+     1a4:	24150007 	li	s5,7
+     1a8:	24140002 	li	s4,2
+     1ac:	24130003 	li	s3,3
+     1b0:	24120004 	li	s2,4
+     1b4:	24110005 	li	s1,5
+     1b8:	00654023 	subu	t0,v1,a1
+     1bc:	25080009 	addiu	t0,t0,9
+     1c0:	00a33021 	addu	a2,a1,v1
+     1c4:	00083840 	sll	a3,t0,0x1
+     1c8:	0005b040 	sll	s6,a1,0x1
+     1cc:	0006b840 	sll	s7,a2,0x1
+     1d0:	24440001 	addiu	a0,v0,1
+     1d4:	02c5b021 	addu	s6,s6,a1
+     1d8:	00e81021 	addu	v0,a3,t0
+     1dc:	02e63021 	addu	a2,s7,a2
+     1e0:	00044080 	sll	t0,a0,0x2
+     1e4:	00163880 	sll	a3,s6,0x2
+     1e8:	00063080 	sll	a2,a2,0x2
+     1ec:	00021080 	sll	v0,v0,0x2
+     1f0:	01284021 	addu	t0,t1,t0
+     1f4:	03a73821 	addu	a3,sp,a3
+     1f8:	03a63021 	addu	a2,sp,a2
+     1fc:	03a21021 	addu	v0,sp,v0
+     200:	acec0000 	sw	t4,0(a3)
+     204:	ad050000 	sw	a1,0(t0)
+     208:	accc0004 	sw	t4,4(a2)
+     20c:	109801dc 	beq	a0,t8,980 <SolveProblem.constprop.0+0x8d0>
+     210:	ac4c0008 	sw	t4,8(v0)
+     214:	8fa20060 	lw	v0,96(sp)
+     218:	14400016 	bnez	v0,274 <SolveProblem.constprop.0+0x1c4>
+     21c:	8fa20054 	lw	v0,84(sp)
+     220:	24650009 	addiu	a1,v1,9
+     224:	00051040 	sll	v0,a1,0x1
+     228:	00451021 	addu	v0,v0,a1
+     22c:	00021080 	sll	v0,v0,0x2
+     230:	03a21021 	addu	v0,sp,v0
+     234:	8c420004 	lw	v0,4(v0)
+     238:	1440000e 	bnez	v0,274 <SolveProblem.constprop.0+0x1c4>
+     23c:	8fa20054 	lw	v0,84(sp)
+     240:	24650002 	addiu	a1,v1,2
+     244:	00051040 	sll	v0,a1,0x1
+     248:	00451021 	addu	v0,v0,a1
+     24c:	00021080 	sll	v0,v0,0x2
+     250:	03a21021 	addu	v0,sp,v0
+     254:	8c420008 	lw	v0,8(v0)
+     258:	14400006 	bnez	v0,274 <SolveProblem.constprop.0+0x1c4>
+     25c:	8fa20054 	lw	v0,84(sp)
+     260:	24620001 	addiu	v0,v1,1
+     264:	ada20000 	sw	v0,0(t5)
+     268:	adb80004 	sw	t8,4(t5)
+     26c:	01e05825 	move	t3,t7
+     270:	8fa20054 	lw	v0,84(sp)
+     274:	14400018 	bnez	v0,2d8 <SolveProblem.constprop.0+0x228>
+     278:	8fa20048 	lw	v0,72(sp)
+     27c:	24650008 	addiu	a1,v1,8
+     280:	00051040 	sll	v0,a1,0x1
+     284:	00451021 	addu	v0,v0,a1
+     288:	00021080 	sll	v0,v0,0x2
+     28c:	03a21021 	addu	v0,sp,v0
+     290:	8c420004 	lw	v0,4(v0)
+     294:	14400010 	bnez	v0,2d8 <SolveProblem.constprop.0+0x228>
+     298:	8fa20048 	lw	v0,72(sp)
+     29c:	24650003 	addiu	a1,v1,3
+     2a0:	00051040 	sll	v0,a1,0x1
+     2a4:	00451021 	addu	v0,v0,a1
+     2a8:	00021080 	sll	v0,v0,0x2
+     2ac:	03a21021 	addu	v0,sp,v0
+     2b0:	8c420008 	lw	v0,8(v0)
+     2b4:	14400008 	bnez	v0,2d8 <SolveProblem.constprop.0+0x228>
+     2b8:	8fa20048 	lw	v0,72(sp)
+     2bc:	256b0001 	addiu	t3,t3,1
+     2c0:	000b10c0 	sll	v0,t3,0x3
+     2c4:	01c21021 	addu	v0,t6,v0
+     2c8:	24650001 	addiu	a1,v1,1
+     2cc:	ac450000 	sw	a1,0(v0)
+     2d0:	ac550004 	sw	s5,4(v0)
+     2d4:	8fa20048 	lw	v0,72(sp)
+     2d8:	14400019 	bnez	v0,340 <SolveProblem.constprop.0+0x290>
+     2dc:	8fa2003c 	lw	v0,60(sp)
+     2e0:	24650007 	addiu	a1,v1,7
+     2e4:	00051040 	sll	v0,a1,0x1
+     2e8:	00451021 	addu	v0,v0,a1
+     2ec:	00021080 	sll	v0,v0,0x2
+     2f0:	03a21021 	addu	v0,sp,v0
+     2f4:	8c420004 	lw	v0,4(v0)
+     2f8:	14400011 	bnez	v0,340 <SolveProblem.constprop.0+0x290>
+     2fc:	8fa2003c 	lw	v0,60(sp)
+     300:	24650004 	addiu	a1,v1,4
+     304:	00051040 	sll	v0,a1,0x1
+     308:	00451021 	addu	v0,v0,a1
+     30c:	00021080 	sll	v0,v0,0x2
+     310:	03a21021 	addu	v0,sp,v0
+     314:	8c420008 	lw	v0,8(v0)
+     318:	14400009 	bnez	v0,340 <SolveProblem.constprop.0+0x290>
+     31c:	8fa2003c 	lw	v0,60(sp)
+     320:	256b0001 	addiu	t3,t3,1
+     324:	000b10c0 	sll	v0,t3,0x3
+     328:	01c21021 	addu	v0,t6,v0
+     32c:	24650001 	addiu	a1,v1,1
+     330:	ac450000 	sw	a1,0(v0)
+     334:	24050006 	li	a1,6
+     338:	ac450004 	sw	a1,4(v0)
+     33c:	8fa2003c 	lw	v0,60(sp)
+     340:	14400018 	bnez	v0,3a4 <SolveProblem.constprop.0+0x2f4>
+     344:	8fa20030 	lw	v0,48(sp)
+     348:	24650006 	addiu	a1,v1,6
+     34c:	00051040 	sll	v0,a1,0x1
+     350:	00451021 	addu	v0,v0,a1
+     354:	00021080 	sll	v0,v0,0x2
+     358:	03a21021 	addu	v0,sp,v0
+     35c:	8c420004 	lw	v0,4(v0)
+     360:	14400010 	bnez	v0,3a4 <SolveProblem.constprop.0+0x2f4>
+     364:	8fa20030 	lw	v0,48(sp)
+     368:	24650005 	addiu	a1,v1,5
+     36c:	00051040 	sll	v0,a1,0x1
+     370:	00451021 	addu	v0,v0,a1
+     374:	00021080 	sll	v0,v0,0x2
+     378:	03a21021 	addu	v0,sp,v0
+     37c:	8c420008 	lw	v0,8(v0)
+     380:	14400008 	bnez	v0,3a4 <SolveProblem.constprop.0+0x2f4>
+     384:	8fa20030 	lw	v0,48(sp)
+     388:	256b0001 	addiu	t3,t3,1
+     38c:	000b10c0 	sll	v0,t3,0x3
+     390:	01c21021 	addu	v0,t6,v0
+     394:	24650001 	addiu	a1,v1,1
+     398:	ac450000 	sw	a1,0(v0)
+     39c:	ac510004 	sw	s1,4(v0)
+     3a0:	8fa20030 	lw	v0,48(sp)
+     3a4:	14400018 	bnez	v0,408 <SolveProblem.constprop.0+0x358>
+     3a8:	8fa20024 	lw	v0,36(sp)
+     3ac:	24650005 	addiu	a1,v1,5
+     3b0:	00051040 	sll	v0,a1,0x1
+     3b4:	00451021 	addu	v0,v0,a1
+     3b8:	00021080 	sll	v0,v0,0x2
+     3bc:	03a21021 	addu	v0,sp,v0
+     3c0:	8c420004 	lw	v0,4(v0)
+     3c4:	14400010 	bnez	v0,408 <SolveProblem.constprop.0+0x358>
+     3c8:	8fa20024 	lw	v0,36(sp)
+     3cc:	24650006 	addiu	a1,v1,6
+     3d0:	00051040 	sll	v0,a1,0x1
+     3d4:	00451021 	addu	v0,v0,a1
+     3d8:	00021080 	sll	v0,v0,0x2
+     3dc:	03a21021 	addu	v0,sp,v0
+     3e0:	8c420008 	lw	v0,8(v0)
+     3e4:	14400008 	bnez	v0,408 <SolveProblem.constprop.0+0x358>
+     3e8:	8fa20024 	lw	v0,36(sp)
+     3ec:	256b0001 	addiu	t3,t3,1
+     3f0:	000b10c0 	sll	v0,t3,0x3
+     3f4:	01c21021 	addu	v0,t6,v0
+     3f8:	24650001 	addiu	a1,v1,1
+     3fc:	ac450000 	sw	a1,0(v0)
+     400:	ac520004 	sw	s2,4(v0)
+     404:	8fa20024 	lw	v0,36(sp)
+     408:	14400018 	bnez	v0,46c <SolveProblem.constprop.0+0x3bc>
+     40c:	8fa20018 	lw	v0,24(sp)
+     410:	24650004 	addiu	a1,v1,4
+     414:	00051040 	sll	v0,a1,0x1
+     418:	00451021 	addu	v0,v0,a1
+     41c:	00021080 	sll	v0,v0,0x2
+     420:	03a21021 	addu	v0,sp,v0
+     424:	8c420004 	lw	v0,4(v0)
+     428:	14400010 	bnez	v0,46c <SolveProblem.constprop.0+0x3bc>
+     42c:	8fa20018 	lw	v0,24(sp)
+     430:	24650007 	addiu	a1,v1,7
+     434:	00051040 	sll	v0,a1,0x1
+     438:	00451021 	addu	v0,v0,a1
+     43c:	00021080 	sll	v0,v0,0x2
+     440:	03a21021 	addu	v0,sp,v0
+     444:	8c420008 	lw	v0,8(v0)
+     448:	14400008 	bnez	v0,46c <SolveProblem.constprop.0+0x3bc>
+     44c:	8fa20018 	lw	v0,24(sp)
+     450:	256b0001 	addiu	t3,t3,1
+     454:	000b10c0 	sll	v0,t3,0x3
+     458:	01c21021 	addu	v0,t6,v0
+     45c:	24650001 	addiu	a1,v1,1
+     460:	ac450000 	sw	a1,0(v0)
+     464:	ac530004 	sw	s3,4(v0)
+     468:	8fa20018 	lw	v0,24(sp)
+     46c:	14400018 	bnez	v0,4d0 <SolveProblem.constprop.0+0x420>
+     470:	8fa2000c 	lw	v0,12(sp)
+     474:	24650003 	addiu	a1,v1,3
+     478:	00051040 	sll	v0,a1,0x1
+     47c:	00451021 	addu	v0,v0,a1
+     480:	00021080 	sll	v0,v0,0x2
+     484:	03a21021 	addu	v0,sp,v0
+     488:	8c420004 	lw	v0,4(v0)
+     48c:	14400010 	bnez	v0,4d0 <SolveProblem.constprop.0+0x420>
+     490:	8fa2000c 	lw	v0,12(sp)
+     494:	24650008 	addiu	a1,v1,8
+     498:	00051040 	sll	v0,a1,0x1
+     49c:	00451021 	addu	v0,v0,a1
+     4a0:	00021080 	sll	v0,v0,0x2
+     4a4:	03a21021 	addu	v0,sp,v0
+     4a8:	8c420008 	lw	v0,8(v0)
+     4ac:	14400008 	bnez	v0,4d0 <SolveProblem.constprop.0+0x420>
+     4b0:	8fa2000c 	lw	v0,12(sp)
+     4b4:	256b0001 	addiu	t3,t3,1
+     4b8:	000b10c0 	sll	v0,t3,0x3
+     4bc:	01c21021 	addu	v0,t6,v0
+     4c0:	24650001 	addiu	a1,v1,1
+     4c4:	ac450000 	sw	a1,0(v0)
+     4c8:	ac540004 	sw	s4,4(v0)
+     4cc:	8fa2000c 	lw	v0,12(sp)
+     4d0:	1440002c 	bnez	v0,584 <SolveProblem.constprop.0+0x4d4>
+     4d4:	8fa50000 	lw	a1,0(sp)
+     4d8:	24660002 	addiu	a2,v1,2
+     4dc:	00061040 	sll	v0,a2,0x1
+     4e0:	00461021 	addu	v0,v0,a2
+     4e4:	00021080 	sll	v0,v0,0x2
+     4e8:	03a21021 	addu	v0,sp,v0
+     4ec:	8c420004 	lw	v0,4(v0)
+     4f0:	14400024 	bnez	v0,584 <SolveProblem.constprop.0+0x4d4>
+     4f4:	24660009 	addiu	a2,v1,9
+     4f8:	00061040 	sll	v0,a2,0x1
+     4fc:	00461021 	addu	v0,v0,a2
+     500:	00021080 	sll	v0,v0,0x2
+     504:	03a21021 	addu	v0,sp,v0
+     508:	8c420008 	lw	v0,8(v0)
+     50c:	1440001d 	bnez	v0,584 <SolveProblem.constprop.0+0x4d4>
+     510:	256f0001 	addiu	t7,t3,1
+     514:	000f10c0 	sll	v0,t7,0x3
+     518:	01c26821 	addu	t5,t6,v0
+     51c:	24660001 	addiu	a2,v1,1
+     520:	ada60000 	sw	a2,0(t5)
+     524:	14a00138 	bnez	a1,a08 <SolveProblem.constprop.0+0x958>
+     528:	adac0004 	sw	t4,4(t5)
+     52c:	00062840 	sll	a1,a2,0x1
+     530:	00a62821 	addu	a1,a1,a2
+     534:	00052880 	sll	a1,a1,0x2
+     538:	03a52821 	addu	a1,sp,a1
+     53c:	8ca50004 	lw	a1,4(a1)
+     540:	14a0000c 	bnez	a1,574 <SolveProblem.constprop.0+0x4c4>
+     544:	00000000 	nop
+     548:	2463000a 	addiu	v1,v1,10
+     54c:	00031040 	sll	v0,v1,0x1
+     550:	00431021 	addu	v0,v0,v1
+     554:	00021080 	sll	v0,v0,0x2
+     558:	03a21021 	addu	v0,sp,v0
+     55c:	8c420008 	lw	v0,8(v0)
+     560:	10400018 	beqz	v0,5c4 <SolveProblem.constprop.0+0x514>
+     564:	01e05825 	move	t3,t7
+     568:	01607825 	move	t7,t3
+     56c:	000b10c0 	sll	v0,t3,0x3
+     570:	01c26821 	addu	t5,t6,v0
+     574:	8da30000 	lw	v1,0(t5)
+     578:	8da50004 	lw	a1,4(t5)
+     57c:	10000018 	b	5e0 <SolveProblem.constprop.0+0x530>
+     580:	25ebffff 	addiu	t3,t7,-1
+     584:	14a0010e 	bnez	a1,9c0 <SolveProblem.constprop.0+0x910>
+     588:	24660001 	addiu	a2,v1,1
+     58c:	00061040 	sll	v0,a2,0x1
+     590:	00461021 	addu	v0,v0,a2
+     594:	00021080 	sll	v0,v0,0x2
+     598:	03a21021 	addu	v0,sp,v0
+     59c:	8c420004 	lw	v0,4(v0)
+     5a0:	14400107 	bnez	v0,9c0 <SolveProblem.constprop.0+0x910>
+     5a4:	2463000a 	addiu	v1,v1,10
+     5a8:	00031040 	sll	v0,v1,0x1
+     5ac:	00431021 	addu	v0,v0,v1
+     5b0:	00021080 	sll	v0,v0,0x2
+     5b4:	03a21021 	addu	v0,sp,v0
+     5b8:	8c420008 	lw	v0,8(v0)
+     5bc:	14400100 	bnez	v0,9c0 <SolveProblem.constprop.0+0x910>
+     5c0:	00000000 	nop
+     5c4:	256f0001 	addiu	t7,t3,1
+     5c8:	000f68c0 	sll	t5,t7,0x3
+     5cc:	01cd6821 	addu	t5,t6,t5
+     5d0:	ada60000 	sw	a2,0(t5)
+     5d4:	ada00004 	sw	zero,4(t5)
+     5d8:	00c01825 	move	v1,a2
+     5dc:	00002825 	move	a1,zero
+     5e0:	0480fef5 	bltz	a0,1b8 <SolveProblem.constprop.0+0x108>
+     5e4:	00801025 	move	v0,a0
+     5e8:	0083102a 	slt	v0,a0,v1
+     5ec:	1440fef2 	bnez	v0,1b8 <SolveProblem.constprop.0+0x108>
+     5f0:	00801025 	move	v0,a0
+     5f4:	00041080 	sll	v0,a0,0x2
+     5f8:	01221021 	addu	v0,t1,v0
+     5fc:	8c570000 	lw	s7,0(v0)
+     600:	2482ffff 	addiu	v0,a0,-1
+     604:	0097b023 	subu	s6,a0,s7
+     608:	0097f021 	addu	s8,a0,s7
+     60c:	26d60009 	addiu	s6,s6,9
+     610:	00174040 	sll	t0,s7,0x1
+     614:	001e3840 	sll	a3,s8,0x1
+     618:	00163040 	sll	a2,s6,0x1
+     61c:	01174021 	addu	t0,t0,s7
+     620:	00fe3821 	addu	a3,a3,s8
+     624:	00d63021 	addu	a2,a2,s6
+     628:	00084080 	sll	t0,t0,0x2
+     62c:	00073880 	sll	a3,a3,0x2
+     630:	00063080 	sll	a2,a2,0x2
+     634:	03a84021 	addu	t0,sp,t0
+     638:	03a73821 	addu	a3,sp,a3
+     63c:	03a63021 	addu	a2,sp,a2
+     640:	ad000000 	sw	zero,0(t0)
+     644:	ace00004 	sw	zero,4(a3)
+     648:	104afedb 	beq	v0,t2,1b8 <SolveProblem.constprop.0+0x108>
+     64c:	acc00008 	sw	zero,8(a2)
+     650:	0043302a 	slt	a2,v0,v1
+     654:	14c0fed8 	bnez	a2,1b8 <SolveProblem.constprop.0+0x108>
+     658:	00023080 	sll	a2,v0,0x2
+     65c:	01263021 	addu	a2,t1,a2
+     660:	8cd70000 	lw	s7,0(a2)
+     664:	2486fffe 	addiu	a2,a0,-2
+     668:	0057b023 	subu	s6,v0,s7
+     66c:	02e2f021 	addu	s8,s7,v0
+     670:	26d60009 	addiu	s6,s6,9
+     674:	00171040 	sll	v0,s7,0x1
+     678:	001e4040 	sll	t0,s8,0x1
+     67c:	00163840 	sll	a3,s6,0x1
+     680:	0057b821 	addu	s7,v0,s7
+     684:	00f63821 	addu	a3,a3,s6
+     688:	011e4021 	addu	t0,t0,s8
+     68c:	00071080 	sll	v0,a3,0x2
+     690:	0017b880 	sll	s7,s7,0x2
+     694:	00084080 	sll	t0,t0,0x2
+     698:	03b7b821 	addu	s7,sp,s7
+     69c:	03a83821 	addu	a3,sp,t0
+     6a0:	03a21021 	addu	v0,sp,v0
+     6a4:	aee00000 	sw	zero,0(s7)
+     6a8:	ace00004 	sw	zero,4(a3)
+     6ac:	10ca00d2 	beq	a2,t2,9f8 <SolveProblem.constprop.0+0x948>
+     6b0:	ac400008 	sw	zero,8(v0)
+     6b4:	00c3102a 	slt	v0,a2,v1
+     6b8:	1440febf 	bnez	v0,1b8 <SolveProblem.constprop.0+0x108>
+     6bc:	00c01025 	move	v0,a2
+     6c0:	00061080 	sll	v0,a2,0x2
+     6c4:	01221021 	addu	v0,t1,v0
+     6c8:	8c570000 	lw	s7,0(v0)
+     6cc:	2482fffd 	addiu	v0,a0,-3
+     6d0:	00d7b023 	subu	s6,a2,s7
+     6d4:	02e6f021 	addu	s8,s7,a2
+     6d8:	26d60009 	addiu	s6,s6,9
+     6dc:	00173040 	sll	a2,s7,0x1
+     6e0:	00163840 	sll	a3,s6,0x1
+     6e4:	001e4040 	sll	t0,s8,0x1
+     6e8:	00d7b821 	addu	s7,a2,s7
+     6ec:	011e4021 	addu	t0,t0,s8
+     6f0:	00f63021 	addu	a2,a3,s6
+     6f4:	0017b880 	sll	s7,s7,0x2
+     6f8:	00083880 	sll	a3,t0,0x2
+     6fc:	00063080 	sll	a2,a2,0x2
+     700:	03b74021 	addu	t0,sp,s7
+     704:	03a73821 	addu	a3,sp,a3
+     708:	03a63021 	addu	a2,sp,a2
+     70c:	ad000000 	sw	zero,0(t0)
+     710:	ace00004 	sw	zero,4(a3)
+     714:	104afea8 	beq	v0,t2,1b8 <SolveProblem.constprop.0+0x108>
+     718:	acc00008 	sw	zero,8(a2)
+     71c:	0043302a 	slt	a2,v0,v1
+     720:	14c0fea5 	bnez	a2,1b8 <SolveProblem.constprop.0+0x108>
+     724:	00023080 	sll	a2,v0,0x2
+     728:	01263021 	addu	a2,t1,a2
+     72c:	8cd70000 	lw	s7,0(a2)
+     730:	2486fffc 	addiu	a2,a0,-4
+     734:	0057b023 	subu	s6,v0,s7
+     738:	02e2f021 	addu	s8,s7,v0
+     73c:	26d60009 	addiu	s6,s6,9
+     740:	00171040 	sll	v0,s7,0x1
+     744:	00163840 	sll	a3,s6,0x1
+     748:	001e4040 	sll	t0,s8,0x1
+     74c:	0057b821 	addu	s7,v0,s7
+     750:	011e4021 	addu	t0,t0,s8
+     754:	00f61021 	addu	v0,a3,s6
+     758:	0017b880 	sll	s7,s7,0x2
+     75c:	00083880 	sll	a3,t0,0x2
+     760:	00021080 	sll	v0,v0,0x2
+     764:	03b74021 	addu	t0,sp,s7
+     768:	03a73821 	addu	a3,sp,a3
+     76c:	03a21021 	addu	v0,sp,v0
+     770:	ad000000 	sw	zero,0(t0)
+     774:	ace00004 	sw	zero,4(a3)
+     778:	10ca009f 	beq	a2,t2,9f8 <SolveProblem.constprop.0+0x948>
+     77c:	ac400008 	sw	zero,8(v0)
+     780:	00c3102a 	slt	v0,a2,v1
+     784:	1440fe8c 	bnez	v0,1b8 <SolveProblem.constprop.0+0x108>
+     788:	00c01025 	move	v0,a2
+     78c:	00061080 	sll	v0,a2,0x2
+     790:	01221021 	addu	v0,t1,v0
+     794:	8c5e0000 	lw	s8,0(v0)
+     798:	2482fffb 	addiu	v0,a0,-5
+     79c:	00deb823 	subu	s7,a2,s8
+     7a0:	26f70009 	addiu	s7,s7,9
+     7a4:	00de3021 	addu	a2,a2,s8
+     7a8:	00064040 	sll	t0,a2,0x1
+     7ac:	00173840 	sll	a3,s7,0x1
+     7b0:	001eb040 	sll	s6,s8,0x1
+     7b4:	01064021 	addu	t0,t0,a2
+     7b8:	02deb021 	addu	s6,s6,s8
+     7bc:	00f73021 	addu	a2,a3,s7
+     7c0:	0016b080 	sll	s6,s6,0x2
+     7c4:	00083880 	sll	a3,t0,0x2
+     7c8:	00063080 	sll	a2,a2,0x2
+     7cc:	03b64021 	addu	t0,sp,s6
+     7d0:	03a73821 	addu	a3,sp,a3
+     7d4:	03a63021 	addu	a2,sp,a2
+     7d8:	ad000000 	sw	zero,0(t0)
+     7dc:	ace00004 	sw	zero,4(a3)
+     7e0:	104afe75 	beq	v0,t2,1b8 <SolveProblem.constprop.0+0x108>
+     7e4:	acc00008 	sw	zero,8(a2)
+     7e8:	0043302a 	slt	a2,v0,v1
+     7ec:	14c0fe72 	bnez	a2,1b8 <SolveProblem.constprop.0+0x108>
+     7f0:	00023080 	sll	a2,v0,0x2
+     7f4:	01263021 	addu	a2,t1,a2
+     7f8:	8cde0000 	lw	s8,0(a2)
+     7fc:	2486fffa 	addiu	a2,a0,-6
+     800:	005eb823 	subu	s7,v0,s8
+     804:	26f70009 	addiu	s7,s7,9
+     808:	005e1021 	addu	v0,v0,s8
+     80c:	00024040 	sll	t0,v0,0x1
+     810:	00173840 	sll	a3,s7,0x1
+     814:	001eb040 	sll	s6,s8,0x1
+     818:	01024021 	addu	t0,t0,v0
+     81c:	02deb021 	addu	s6,s6,s8
+     820:	00f71021 	addu	v0,a3,s7
+     824:	0016b080 	sll	s6,s6,0x2
+     828:	00083880 	sll	a3,t0,0x2
+     82c:	00021080 	sll	v0,v0,0x2
+     830:	03b64021 	addu	t0,sp,s6
+     834:	03a73821 	addu	a3,sp,a3
+     838:	03a21021 	addu	v0,sp,v0
+     83c:	ad000000 	sw	zero,0(t0)
+     840:	ace00004 	sw	zero,4(a3)
+     844:	10ca006c 	beq	a2,t2,9f8 <SolveProblem.constprop.0+0x948>
+     848:	ac400008 	sw	zero,8(v0)
+     84c:	00c3102a 	slt	v0,a2,v1
+     850:	1440fe59 	bnez	v0,1b8 <SolveProblem.constprop.0+0x108>
+     854:	00c01025 	move	v0,a2
+     858:	00061080 	sll	v0,a2,0x2
+     85c:	01221021 	addu	v0,t1,v0
+     860:	8c5e0000 	lw	s8,0(v0)
+     864:	2482fff9 	addiu	v0,a0,-7
+     868:	00deb823 	subu	s7,a2,s8
+     86c:	26f70009 	addiu	s7,s7,9
+     870:	03c63021 	addu	a2,s8,a2
+     874:	00064040 	sll	t0,a2,0x1
+     878:	00173840 	sll	a3,s7,0x1
+     87c:	001eb040 	sll	s6,s8,0x1
+     880:	01064021 	addu	t0,t0,a2
+     884:	02deb021 	addu	s6,s6,s8
+     888:	00f73021 	addu	a2,a3,s7
+     88c:	0016b080 	sll	s6,s6,0x2
+     890:	00083880 	sll	a3,t0,0x2
+     894:	00063080 	sll	a2,a2,0x2
+     898:	03b64021 	addu	t0,sp,s6
+     89c:	03a73821 	addu	a3,sp,a3
+     8a0:	03a63021 	addu	a2,sp,a2
+     8a4:	ad000000 	sw	zero,0(t0)
+     8a8:	ace00004 	sw	zero,4(a3)
+     8ac:	104afe42 	beq	v0,t2,1b8 <SolveProblem.constprop.0+0x108>
+     8b0:	acc00008 	sw	zero,8(a2)
+     8b4:	0043302a 	slt	a2,v0,v1
+     8b8:	14c0fe3f 	bnez	a2,1b8 <SolveProblem.constprop.0+0x108>
+     8bc:	00023080 	sll	a2,v0,0x2
+     8c0:	01263021 	addu	a2,t1,a2
+     8c4:	8cde0000 	lw	s8,0(a2)
+     8c8:	2486fff8 	addiu	a2,a0,-8
+     8cc:	005eb823 	subu	s7,v0,s8
+     8d0:	26f70009 	addiu	s7,s7,9
+     8d4:	005e1021 	addu	v0,v0,s8
+     8d8:	00024040 	sll	t0,v0,0x1
+     8dc:	00173840 	sll	a3,s7,0x1
+     8e0:	001eb040 	sll	s6,s8,0x1
+     8e4:	01024021 	addu	t0,t0,v0
+     8e8:	02deb021 	addu	s6,s6,s8
+     8ec:	00f71021 	addu	v0,a3,s7
+     8f0:	0016b080 	sll	s6,s6,0x2
+     8f4:	00083880 	sll	a3,t0,0x2
+     8f8:	00021080 	sll	v0,v0,0x2
+     8fc:	03b64021 	addu	t0,sp,s6
+     900:	03a73821 	addu	a3,sp,a3
+     904:	03a21021 	addu	v0,sp,v0
+     908:	ad000000 	sw	zero,0(t0)
+     90c:	ace00004 	sw	zero,4(a3)
+     910:	10ca0039 	beq	a2,t2,9f8 <SolveProblem.constprop.0+0x948>
+     914:	ac400008 	sw	zero,8(v0)
+     918:	00c3102a 	slt	v0,a2,v1
+     91c:	14400038 	bnez	v0,a00 <SolveProblem.constprop.0+0x950>
+     920:	00000000 	nop
+     924:	00061080 	sll	v0,a2,0x2
+     928:	01221021 	addu	v0,t1,v0
+     92c:	8c470000 	lw	a3,0(v0)
+     930:	2482fff7 	addiu	v0,a0,-9
+     934:	00c72023 	subu	a0,a2,a3
+     938:	00e6b021 	addu	s6,a3,a2
+     93c:	24880009 	addiu	t0,a0,9
+     940:	0007b840 	sll	s7,a3,0x1
+     944:	00163040 	sll	a2,s6,0x1
+     948:	00082040 	sll	a0,t0,0x1
+     94c:	02e73821 	addu	a3,s7,a3
+     950:	00d63021 	addu	a2,a2,s6
+     954:	00882021 	addu	a0,a0,t0
+     958:	00073880 	sll	a3,a3,0x2
+     95c:	00063080 	sll	a2,a2,0x2
+     960:	00042080 	sll	a0,a0,0x2
+     964:	03a73821 	addu	a3,sp,a3
+     968:	03a63021 	addu	a2,sp,a2
+     96c:	03a42021 	addu	a0,sp,a0
+     970:	ace00000 	sw	zero,0(a3)
+     974:	acc00004 	sw	zero,4(a2)
+     978:	1000fe0f 	b	1b8 <SolveProblem.constprop.0+0x108>
+     97c:	ac800008 	sw	zero,8(a0)
+     980:	27390001 	addiu	t9,t9,1
+     984:	4099b800 	mtc0	t9,$23
+     988:	24a40008 	addiu	a0,a1,8
+     98c:	02052823 	subu	a1,s0,a1
+     990:	00041840 	sll	v1,a0,0x1
+     994:	00051040 	sll	v0,a1,0x1
+     998:	00641821 	addu	v1,v1,a0
+     99c:	00451021 	addu	v0,v0,a1
+     9a0:	00031880 	sll	v1,v1,0x2
+     9a4:	00021080 	sll	v0,v0,0x2
+     9a8:	03a31821 	addu	v1,sp,v1
+     9ac:	03a21021 	addu	v0,sp,v0
+     9b0:	ace00000 	sw	zero,0(a3)
+     9b4:	24040007 	li	a0,7
+     9b8:	ac600004 	sw	zero,4(v1)
+     9bc:	ac400008 	sw	zero,8(v0)
+     9c0:	156afeea 	bne	t3,t2,56c <SolveProblem.constprop.0+0x4bc>
+     9c4:	01607825 	move	t7,t3
+     9c8:	4099c800 	mtc0	t9,$25
+     9cc:	8fbe04dc 	lw	s8,1244(sp)
+     9d0:	8fb704d8 	lw	s7,1240(sp)
+     9d4:	8fb604d4 	lw	s6,1236(sp)
+     9d8:	8fb504d0 	lw	s5,1232(sp)
+     9dc:	8fb404cc 	lw	s4,1228(sp)
+     9e0:	8fb304c8 	lw	s3,1224(sp)
+     9e4:	8fb204c4 	lw	s2,1220(sp)
+     9e8:	8fb104c0 	lw	s1,1216(sp)
+     9ec:	8fb004bc 	lw	s0,1212(sp)
+     9f0:	03e00008 	jr	ra
+     9f4:	27bd04e0 	addiu	sp,sp,1248
+     9f8:	1000fdef 	b	1b8 <SolveProblem.constprop.0+0x108>
+     9fc:	2402ffff 	li	v0,-1
+     a00:	1000fded 	b	1b8 <SolveProblem.constprop.0+0x108>
+     a04:	00c01025 	move	v0,a2
+     a08:	00c01825 	move	v1,a2
+     a0c:	1000fef4 	b	5e0 <SolveProblem.constprop.0+0x530>
+     a10:	24050001 	li	a1,1
+
+00000a14 <print_uart>:
+     a14:	90830000 	lbu	v1,0(a0)
+     a18:	1060000a 	beqz	v1,a44 <print_uart+0x30>
+     a1c:	00000000 	nop
+     a20:	8c023ffc 	lw	v0,16380(zero)
+     a24:	30420100 	andi	v0,v0,0x100
+     a28:	1440fffd 	bnez	v0,a20 <print_uart+0xc>
+     a2c:	00000000 	nop
+     a30:	24840001 	addiu	a0,a0,1
+     a34:	a0033ffc 	sb	v1,16380(zero)
+     a38:	90830000 	lbu	v1,0(a0)
+     a3c:	1460fff8 	bnez	v1,a20 <print_uart+0xc>
+     a40:	00000000 	nop
+     a44:	03e00008 	jr	ra
+     a48:	00000000 	nop
+
+00000a4c <putc_uart>:
+     a4c:	8c023ffc 	lw	v0,16380(zero)
+     a50:	30420100 	andi	v0,v0,0x100
+     a54:	1440fffd 	bnez	v0,a4c <putc_uart>
+     a58:	00000000 	nop
+     a5c:	a0043ffc 	sb	a0,16380(zero)
+     a60:	03e00008 	jr	ra
+     a64:	00000000 	nop
+
+00000a68 <print>:
+     a68:	10000004 	b	a7c <print+0x14>
+     a6c:	90820000 	lbu	v0,0(a0)
+     a70:	24840001 	addiu	a0,a0,1
+     a74:	a0023ff0 	sb	v0,16368(zero)
+     a78:	90820000 	lbu	v0,0(a0)
+     a7c:	1440fffc 	bnez	v0,a70 <print+0x8>
+     a80:	00000000 	nop
+     a84:	a0003ff0 	sb	zero,16368(zero)
+     a88:	03e00008 	jr	ra
+     a8c:	00000000 	nop
+
+00000a90 <print_char>:
+     a90:	a0043ff0 	sb	a0,16368(zero)
+     a94:	03e00008 	jr	ra
+     a98:	00000000 	nop
+
+00000a9c <print_num>:
+     a9c:	3c07cccc 	lui	a3,0xcccc
+     aa0:	00802825 	move	a1,a0
+     aa4:	24060004 	li	a2,4
+     aa8:	240303e8 	li	v1,1000
+     aac:	34e7cccd 	ori	a3,a3,0xcccd
+     ab0:	00a3001b 	divu	zero,a1,v1
+     ab4:	006001f4 	teq	v1,zero,0x7
+     ab8:	00002812 	mflo	a1
+     abc:	00002010 	mfhi	a0
+     ac0:	24a50030 	addiu	a1,a1,48
+     ac4:	30a500ff 	andi	a1,a1,0xff
+     ac8:	8c023ffc 	lw	v0,16380(zero)
+     acc:	30420100 	andi	v0,v0,0x100
+     ad0:	1440fffd 	bnez	v0,ac8 <print_num+0x2c>
+     ad4:	00670019 	multu	v1,a3
+     ad8:	24c6ffff 	addiu	a2,a2,-1
+     adc:	00001810 	mfhi	v1
+     ae0:	a0053ffc 	sb	a1,16380(zero)
+     ae4:	000318c2 	srl	v1,v1,0x3
+     ae8:	14c0fff1 	bnez	a2,ab0 <print_num+0x14>
+     aec:	00802825 	move	a1,a0
+     af0:	03e00008 	jr	ra
+     af4:	00000000 	nop
+
+00000af8 <begin>:
+     af8:	27bdffe8 	addiu	sp,sp,-24
+     afc:	3c020000 	lui	v0,0x0
+     b00:	24030009 	li	v1,9
+     b04:	ac431120 	sw	v1,4384(v0)
+     b08:	afbf0014 	sw	ra,20(sp)
+     b0c:	0c00002c 	jal	b0 <SolveProblem.constprop.0>
+     b10:	00000000 	nop
+     b14:	8fbf0014 	lw	ra,20(sp)
+     b18:	00001025 	move	v0,zero
+     b1c:	03e00008 	jr	ra
+     b20:	27bd0018 	addiu	sp,sp,24
+
+00000b24 <SolveProblem>:
+     b24:	27bdfb30 	addiu	sp,sp,-1232
+     b28:	27a204b0 	addiu	v0,sp,1200
+     b2c:	afb404cc 	sw	s4,1228(sp)
+     b30:	afb304c8 	sw	s3,1224(sp)
+     b34:	afb204c4 	sw	s2,1220(sp)
+     b38:	afb104c0 	sw	s1,1216(sp)
+     b3c:	afb004bc 	sw	s0,1212(sp)
+     b40:	afbd04b0 	sw	sp,1200(sp)
+     b44:	8fa304b0 	lw	v1,1200(sp)
+     b48:	ac600000 	sw	zero,0(v1)
+     b4c:	ac600004 	sw	zero,4(v1)
+     b50:	ac600008 	sw	zero,8(v1)
+     b54:	2463000c 	addiu	v1,v1,12
+     b58:	1462fffa 	bne	v1,v0,b44 <SolveProblem+0x20>
+     b5c:	afa304b0 	sw	v1,1200(sp)
+     b60:	248effff 	addiu	t6,a0,-1
+     b64:	05c00158 	bltz	t6,10c8 <SolveProblem+0x5a4>
+     b68:	3c0f0000 	lui	t7,0x0
+     b6c:	25ef1130 	addiu	t7,t7,4400
+     b70:	01e01025 	move	v0,t7
+     b74:	01c05825 	move	t3,t6
+     b78:	2403ffff 	li	v1,-1
+     b7c:	ac4b0004 	sw	t3,4(v0)
+     b80:	256bffff 	addiu	t3,t3,-1
+     b84:	ac400000 	sw	zero,0(v0)
+     b88:	1563fffc 	bne	t3,v1,b7c <SolveProblem+0x58>
+     b8c:	24420008 	addiu	v0,v0,8
+     b90:	0004c040 	sll	t8,a0,0x1
+     b94:	0304c021 	addu	t8,t8,a0
+     b98:	0018c080 	sll	t8,t8,0x2
+     b9c:	2718fff4 	addiu	t8,t8,-12
+     ba0:	3c0a0000 	lui	t2,0x0
+     ba4:	2490fffe 	addiu	s0,a0,-2
+     ba8:	03b8c021 	addu	t8,sp,t8
+     bac:	001d6840 	sll	t5,sp,0x1
+     bb0:	2402ffff 	li	v0,-1
+     bb4:	0000c825 	move	t9,zero
+     bb8:	00008825 	move	s1,zero
+     bbc:	00003025 	move	a2,zero
+     bc0:	254a13b8 	addiu	t2,t2,5048
+     bc4:	240c0001 	li	t4,1
+     bc8:	2407ffff 	li	a3,-1
+     bcc:	00d14023 	subu	t0,a2,s1
+     bd0:	01049021 	addu	s2,t0,a0
+     bd4:	02269821 	addu	s3,s1,a2
+     bd8:	00124040 	sll	t0,s2,0x1
+     bdc:	00111840 	sll	v1,s1,0x1
+     be0:	00134840 	sll	t1,s3,0x1
+     be4:	01124021 	addu	t0,t0,s2
+     be8:	24450001 	addiu	a1,v0,1
+     bec:	00711821 	addu	v1,v1,s1
+     bf0:	01334821 	addu	t1,t1,s3
+     bf4:	00059080 	sll	s2,a1,0x2
+     bf8:	00031880 	sll	v1,v1,0x2
+     bfc:	00094880 	sll	t1,t1,0x2
+     c00:	00084080 	sll	t0,t0,0x2
+     c04:	01529021 	addu	s2,t2,s2
+     c08:	03a31821 	addu	v1,sp,v1
+     c0c:	03a94821 	addu	t1,sp,t1
+     c10:	03a84021 	addu	t0,sp,t0
+     c14:	ac6c0000 	sw	t4,0(v1)
+     c18:	ae510000 	sw	s1,0(s2)
+     c1c:	ad2c0004 	sw	t4,4(t1)
+     c20:	11c5010d 	beq	t6,a1,1058 <SolveProblem+0x534>
+     c24:	ad0c0008 	sw	t4,8(t0)
+     c28:	00861021 	addu	v0,a0,a2
+     c2c:	00068840 	sll	s1,a2,0x1
+     c30:	00029040 	sll	s2,v0,0x1
+     c34:	02268821 	addu	s1,s1,a2
+     c38:	02429021 	addu	s2,s2,v0
+     c3c:	00118880 	sll	s1,s1,0x2
+     c40:	00129080 	sll	s2,s2,0x2
+     c44:	03001025 	move	v0,t8
+     c48:	01c01825 	move	v1,t6
+     c4c:	24c60001 	addiu	a2,a2,1
+     c50:	8c480000 	lw	t0,0(v0)
+     c54:	1500000d 	bnez	t0,c8c <SolveProblem+0x168>
+     c58:	00514821 	addu	t1,v0,s1
+     c5c:	8d290010 	lw	t1,16(t1)
+     c60:	02424023 	subu	t0,s2,v0
+     c64:	15200009 	bnez	t1,c8c <SolveProblem+0x168>
+     c68:	010d4021 	addu	t0,t0,t5
+     c6c:	8d080014 	lw	t0,20(t0)
+     c70:	15000006 	bnez	t0,c8c <SolveProblem+0x168>
+     c74:	00000000 	nop
+     c78:	26100001 	addiu	s0,s0,1
+     c7c:	001040c0 	sll	t0,s0,0x3
+     c80:	01e84021 	addu	t0,t7,t0
+     c84:	ad030004 	sw	v1,4(t0)
+     c88:	ad060000 	sw	a2,0(t0)
+     c8c:	2463ffff 	addiu	v1,v1,-1
+     c90:	1467ffef 	bne	v1,a3,c50 <SolveProblem+0x12c>
+     c94:	2442fff4 	addiu	v0,v0,-12
+     c98:	12070101 	beq	s0,a3,10a0 <SolveProblem+0x57c>
+     c9c:	00000000 	nop
+     ca0:	001010c0 	sll	v0,s0,0x3
+     ca4:	01e21021 	addu	v0,t7,v0
+     ca8:	8c460000 	lw	a2,0(v0)
+     cac:	8c510004 	lw	s1,4(v0)
+     cb0:	04a00103 	bltz	a1,10c0 <SolveProblem+0x59c>
+     cb4:	2610ffff 	addiu	s0,s0,-1
+     cb8:	00a6102a 	slt	v0,a1,a2
+     cbc:	1440ffc3 	bnez	v0,bcc <SolveProblem+0xa8>
+     cc0:	00a01025 	move	v0,a1
+     cc4:	00051080 	sll	v0,a1,0x2
+     cc8:	01421021 	addu	v0,t2,v0
+     ccc:	8c530000 	lw	s3,0(v0)
+     cd0:	24a2ffff 	addiu	v0,a1,-1
+     cd4:	00b31823 	subu	v1,a1,s3
+     cd8:	00b3a021 	addu	s4,a1,s3
+     cdc:	00649021 	addu	s2,v1,a0
+     ce0:	00134840 	sll	t1,s3,0x1
+     ce4:	00144040 	sll	t0,s4,0x1
+     ce8:	00121840 	sll	v1,s2,0x1
+     cec:	01334821 	addu	t1,t1,s3
+     cf0:	01144021 	addu	t0,t0,s4
+     cf4:	00721821 	addu	v1,v1,s2
+     cf8:	00094880 	sll	t1,t1,0x2
+     cfc:	00084080 	sll	t0,t0,0x2
+     d00:	00031880 	sll	v1,v1,0x2
+     d04:	03a94821 	addu	t1,sp,t1
+     d08:	03a84021 	addu	t0,sp,t0
+     d0c:	03a31821 	addu	v1,sp,v1
+     d10:	ad200000 	sw	zero,0(t1)
+     d14:	ad000004 	sw	zero,4(t0)
+     d18:	104700cd 	beq	v0,a3,1050 <SolveProblem+0x52c>
+     d1c:	ac600008 	sw	zero,8(v1)
+     d20:	0046182a 	slt	v1,v0,a2
+     d24:	1460ffa9 	bnez	v1,bcc <SolveProblem+0xa8>
+     d28:	00021880 	sll	v1,v0,0x2
+     d2c:	01431821 	addu	v1,t2,v1
+     d30:	8c730000 	lw	s3,0(v1)
+     d34:	24a3fffe 	addiu	v1,a1,-2
+     d38:	00539023 	subu	s2,v0,s3
+     d3c:	0262a021 	addu	s4,s3,v0
+     d40:	02449021 	addu	s2,s2,a0
+     d44:	00134840 	sll	t1,s3,0x1
+     d48:	00144040 	sll	t0,s4,0x1
+     d4c:	00121040 	sll	v0,s2,0x1
+     d50:	01334821 	addu	t1,t1,s3
+     d54:	01144021 	addu	t0,t0,s4
+     d58:	00521021 	addu	v0,v0,s2
+     d5c:	00094880 	sll	t1,t1,0x2
+     d60:	00084080 	sll	t0,t0,0x2
+     d64:	00021080 	sll	v0,v0,0x2
+     d68:	03a94821 	addu	t1,sp,t1
+     d6c:	03a84021 	addu	t0,sp,t0
+     d70:	03a21021 	addu	v0,sp,v0
+     d74:	ad200000 	sw	zero,0(t1)
+     d78:	ad000004 	sw	zero,4(t0)
+     d7c:	106700b4 	beq	v1,a3,1050 <SolveProblem+0x52c>
+     d80:	ac400008 	sw	zero,8(v0)
+     d84:	0066102a 	slt	v0,v1,a2
+     d88:	1440ff90 	bnez	v0,bcc <SolveProblem+0xa8>
+     d8c:	00601025 	move	v0,v1
+     d90:	00031080 	sll	v0,v1,0x2
+     d94:	01421021 	addu	v0,t2,v0
+     d98:	8c530000 	lw	s3,0(v0)
+     d9c:	24a2fffd 	addiu	v0,a1,-3
+     da0:	00739023 	subu	s2,v1,s3
+     da4:	0263a021 	addu	s4,s3,v1
+     da8:	02449021 	addu	s2,s2,a0
+     dac:	00134840 	sll	t1,s3,0x1
+     db0:	00144040 	sll	t0,s4,0x1
+     db4:	00121840 	sll	v1,s2,0x1
+     db8:	01334821 	addu	t1,t1,s3
+     dbc:	01144021 	addu	t0,t0,s4
+     dc0:	00721821 	addu	v1,v1,s2
+     dc4:	00094880 	sll	t1,t1,0x2
+     dc8:	00084080 	sll	t0,t0,0x2
+     dcc:	00031880 	sll	v1,v1,0x2
+     dd0:	03a94821 	addu	t1,sp,t1
+     dd4:	03a84021 	addu	t0,sp,t0
+     dd8:	03a31821 	addu	v1,sp,v1
+     ddc:	ad200000 	sw	zero,0(t1)
+     de0:	ad000004 	sw	zero,4(t0)
+     de4:	1047009a 	beq	v0,a3,1050 <SolveProblem+0x52c>
+     de8:	ac600008 	sw	zero,8(v1)
+     dec:	0046182a 	slt	v1,v0,a2
+     df0:	1460ff76 	bnez	v1,bcc <SolveProblem+0xa8>
+     df4:	00021880 	sll	v1,v0,0x2
+     df8:	01431821 	addu	v1,t2,v1
+     dfc:	8c730000 	lw	s3,0(v1)
+     e00:	24a3fffc 	addiu	v1,a1,-4
+     e04:	00539023 	subu	s2,v0,s3
+     e08:	0053a021 	addu	s4,v0,s3
+     e0c:	02449021 	addu	s2,s2,a0
+     e10:	00134840 	sll	t1,s3,0x1
+     e14:	00144040 	sll	t0,s4,0x1
+     e18:	00121040 	sll	v0,s2,0x1
+     e1c:	01334821 	addu	t1,t1,s3
+     e20:	01144021 	addu	t0,t0,s4
+     e24:	00521021 	addu	v0,v0,s2
+     e28:	00094880 	sll	t1,t1,0x2
+     e2c:	00084080 	sll	t0,t0,0x2
+     e30:	00021080 	sll	v0,v0,0x2
+     e34:	03a94821 	addu	t1,sp,t1
+     e38:	03a84021 	addu	t0,sp,t0
+     e3c:	03a21021 	addu	v0,sp,v0
+     e40:	ad200000 	sw	zero,0(t1)
+     e44:	ad000004 	sw	zero,4(t0)
+     e48:	10670081 	beq	v1,a3,1050 <SolveProblem+0x52c>
+     e4c:	ac400008 	sw	zero,8(v0)
+     e50:	0066102a 	slt	v0,v1,a2
+     e54:	1440ff5d 	bnez	v0,bcc <SolveProblem+0xa8>
+     e58:	00601025 	move	v0,v1
+     e5c:	00031080 	sll	v0,v1,0x2
+     e60:	01421021 	addu	v0,t2,v0
+     e64:	8c530000 	lw	s3,0(v0)
+     e68:	24a2fffb 	addiu	v0,a1,-5
+     e6c:	00739023 	subu	s2,v1,s3
+     e70:	0073a021 	addu	s4,v1,s3
+     e74:	02449021 	addu	s2,s2,a0
+     e78:	00134840 	sll	t1,s3,0x1
+     e7c:	00144040 	sll	t0,s4,0x1
+     e80:	00121840 	sll	v1,s2,0x1
+     e84:	01334821 	addu	t1,t1,s3
+     e88:	01144021 	addu	t0,t0,s4
+     e8c:	00721821 	addu	v1,v1,s2
+     e90:	00094880 	sll	t1,t1,0x2
+     e94:	00084080 	sll	t0,t0,0x2
+     e98:	00031880 	sll	v1,v1,0x2
+     e9c:	03a94821 	addu	t1,sp,t1
+     ea0:	03a84021 	addu	t0,sp,t0
+     ea4:	03a31821 	addu	v1,sp,v1
+     ea8:	ad200000 	sw	zero,0(t1)
+     eac:	ad000004 	sw	zero,4(t0)
+     eb0:	10470067 	beq	v0,a3,1050 <SolveProblem+0x52c>
+     eb4:	ac600008 	sw	zero,8(v1)
+     eb8:	0046182a 	slt	v1,v0,a2
+     ebc:	1460ff43 	bnez	v1,bcc <SolveProblem+0xa8>
+     ec0:	00021880 	sll	v1,v0,0x2
+     ec4:	01431821 	addu	v1,t2,v1
+     ec8:	8c730000 	lw	s3,0(v1)
+     ecc:	24a3fffa 	addiu	v1,a1,-6
+     ed0:	00539023 	subu	s2,v0,s3
+     ed4:	0053a021 	addu	s4,v0,s3
+     ed8:	02449021 	addu	s2,s2,a0
+     edc:	00134840 	sll	t1,s3,0x1
+     ee0:	00144040 	sll	t0,s4,0x1
+     ee4:	00121040 	sll	v0,s2,0x1
+     ee8:	01334821 	addu	t1,t1,s3
+     eec:	01144021 	addu	t0,t0,s4
+     ef0:	00521021 	addu	v0,v0,s2
+     ef4:	00094880 	sll	t1,t1,0x2
+     ef8:	00084080 	sll	t0,t0,0x2
+     efc:	00021080 	sll	v0,v0,0x2
+     f00:	03a94821 	addu	t1,sp,t1
+     f04:	03a84021 	addu	t0,sp,t0
+     f08:	03a21021 	addu	v0,sp,v0
+     f0c:	ad200000 	sw	zero,0(t1)
+     f10:	ad000004 	sw	zero,4(t0)
+     f14:	1067004e 	beq	v1,a3,1050 <SolveProblem+0x52c>
+     f18:	ac400008 	sw	zero,8(v0)
+     f1c:	0066102a 	slt	v0,v1,a2
+     f20:	1440ff2a 	bnez	v0,bcc <SolveProblem+0xa8>
+     f24:	00601025 	move	v0,v1
+     f28:	00031080 	sll	v0,v1,0x2
+     f2c:	01421021 	addu	v0,t2,v0
+     f30:	8c530000 	lw	s3,0(v0)
+     f34:	24a2fff9 	addiu	v0,a1,-7
+     f38:	00739023 	subu	s2,v1,s3
+     f3c:	0073a021 	addu	s4,v1,s3
+     f40:	02449021 	addu	s2,s2,a0
+     f44:	00134840 	sll	t1,s3,0x1
+     f48:	00144040 	sll	t0,s4,0x1
+     f4c:	00121840 	sll	v1,s2,0x1
+     f50:	01334821 	addu	t1,t1,s3
+     f54:	01144021 	addu	t0,t0,s4
+     f58:	00721821 	addu	v1,v1,s2
+     f5c:	00094880 	sll	t1,t1,0x2
+     f60:	00084080 	sll	t0,t0,0x2
+     f64:	00031880 	sll	v1,v1,0x2
+     f68:	03a94821 	addu	t1,sp,t1
+     f6c:	03a84021 	addu	t0,sp,t0
+     f70:	03a31821 	addu	v1,sp,v1
+     f74:	ad200000 	sw	zero,0(t1)
+     f78:	ad000004 	sw	zero,4(t0)
+     f7c:	10470034 	beq	v0,a3,1050 <SolveProblem+0x52c>
+     f80:	ac600008 	sw	zero,8(v1)
+     f84:	0046182a 	slt	v1,v0,a2
+     f88:	1460ff10 	bnez	v1,bcc <SolveProblem+0xa8>
+     f8c:	00021880 	sll	v1,v0,0x2
+     f90:	01431821 	addu	v1,t2,v1
+     f94:	8c730000 	lw	s3,0(v1)
+     f98:	24a3fff8 	addiu	v1,a1,-8
+     f9c:	00539023 	subu	s2,v0,s3
+     fa0:	0053a021 	addu	s4,v0,s3
+     fa4:	02449021 	addu	s2,s2,a0
+     fa8:	00134840 	sll	t1,s3,0x1
+     fac:	00144040 	sll	t0,s4,0x1
+     fb0:	00121040 	sll	v0,s2,0x1
+     fb4:	01334821 	addu	t1,t1,s3
+     fb8:	01144021 	addu	t0,t0,s4
+     fbc:	00521021 	addu	v0,v0,s2
+     fc0:	00094880 	sll	t1,t1,0x2
+     fc4:	00084080 	sll	t0,t0,0x2
+     fc8:	00021080 	sll	v0,v0,0x2
+     fcc:	03a94821 	addu	t1,sp,t1
+     fd0:	03a84021 	addu	t0,sp,t0
+     fd4:	03a21021 	addu	v0,sp,v0
+     fd8:	ad200000 	sw	zero,0(t1)
+     fdc:	ad000004 	sw	zero,4(t0)
+     fe0:	1067001b 	beq	v1,a3,1050 <SolveProblem+0x52c>
+     fe4:	ac400008 	sw	zero,8(v0)
+     fe8:	0066102a 	slt	v0,v1,a2
+     fec:	1440fef7 	bnez	v0,bcc <SolveProblem+0xa8>
+     ff0:	00601025 	move	v0,v1
+     ff4:	00031080 	sll	v0,v1,0x2
+     ff8:	01421021 	addu	v0,t2,v0
+     ffc:	8c520000 	lw	s2,0(v0)
+    1000:	24a2fff7 	addiu	v0,a1,-9
+    1004:	00724823 	subu	t1,v1,s2
+    1008:	02439821 	addu	s3,s2,v1
+    100c:	01244821 	addu	t1,t1,a0
+    1010:	00124040 	sll	t0,s2,0x1
+    1014:	00132840 	sll	a1,s3,0x1
+    1018:	00091840 	sll	v1,t1,0x1
+    101c:	01124021 	addu	t0,t0,s2
+    1020:	00b32821 	addu	a1,a1,s3
+    1024:	00691821 	addu	v1,v1,t1
+    1028:	00084080 	sll	t0,t0,0x2
+    102c:	00052880 	sll	a1,a1,0x2
+    1030:	00031880 	sll	v1,v1,0x2
+    1034:	03a84021 	addu	t0,sp,t0
+    1038:	03a52821 	addu	a1,sp,a1
+    103c:	03a31821 	addu	v1,sp,v1
+    1040:	ad000000 	sw	zero,0(t0)
+    1044:	aca00004 	sw	zero,4(a1)
+    1048:	1447fee0 	bne	v0,a3,bcc <SolveProblem+0xa8>
+    104c:	ac600008 	sw	zero,8(v1)
+    1050:	1000fede 	b	bcc <SolveProblem+0xa8>
+    1054:	01601025 	move	v0,t3
+    1058:	27390001 	addiu	t9,t9,1
+    105c:	4099b800 	mtc0	t9,$23
+    1060:	01d12823 	subu	a1,t6,s1
+    1064:	00a42821 	addu	a1,a1,a0
+    1068:	022e8821 	addu	s1,s1,t6
+    106c:	00053040 	sll	a2,a1,0x1
+    1070:	00114040 	sll	t0,s1,0x1
+    1074:	00c53021 	addu	a2,a2,a1
+    1078:	01114021 	addu	t0,t0,s1
+    107c:	00084080 	sll	t0,t0,0x2
+    1080:	00063080 	sll	a2,a2,0x2
+    1084:	03a84021 	addu	t0,sp,t0
+    1088:	03a63021 	addu	a2,sp,a2
+    108c:	ac600000 	sw	zero,0(v1)
+    1090:	00402825 	move	a1,v0
+    1094:	ad000004 	sw	zero,4(t0)
+    1098:	1607ff01 	bne	s0,a3,ca0 <SolveProblem+0x17c>
+    109c:	acc00008 	sw	zero,8(a2)
+    10a0:	4099c800 	mtc0	t9,$25
+    10a4:	8fb404cc 	lw	s4,1228(sp)
+    10a8:	8fb304c8 	lw	s3,1224(sp)
+    10ac:	8fb204c4 	lw	s2,1220(sp)
+    10b0:	8fb104c0 	lw	s1,1216(sp)
+    10b4:	8fb004bc 	lw	s0,1212(sp)
+    10b8:	03e00008 	jr	ra
+    10bc:	27bd04d0 	addiu	sp,sp,1232
+    10c0:	1000fec2 	b	bcc <SolveProblem+0xa8>
+    10c4:	00a01025 	move	v0,a1
+    10c8:	0000c825 	move	t9,zero
+    10cc:	4099c800 	mtc0	t9,$25
+    10d0:	8fb404cc 	lw	s4,1228(sp)
+    10d4:	8fb304c8 	lw	s3,1224(sp)
+    10d8:	8fb204c4 	lw	s2,1220(sp)
+    10dc:	8fb104c0 	lw	s1,1216(sp)
+    10e0:	8fb004bc 	lw	s0,1212(sp)
+    10e4:	03e00008 	jr	ra
+    10e8:	27bd04d0 	addiu	sp,sp,1232
+    10ec:	00000000 	nop
