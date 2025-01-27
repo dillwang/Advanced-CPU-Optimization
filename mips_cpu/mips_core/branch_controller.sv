@@ -165,7 +165,7 @@ module branch_predictor_global_share (
     input logic [`ADDR_WIDTH - 1 : 0] i_fb_pc,
     input mips_core_pkg::BranchOutcome i_fb_outcome
 );
-    parameter integer GHR_BITS = 8;  // Global History Register size
+    parameter integer GHR_BITS = 64;  // Global History Register size
     parameter integer PHT_ENTRIES = (1 << GHR_BITS); // Number of entries in PHT
 
     // Registers and Tables
