@@ -1,14 +1,11 @@
 # Advanced-CPU-Optimization
 
 This is an on going CPU architecture design group project that primarily focus on implementing modern state of the art optimization methods to speedup a simple baseline CPU architecture.
-Here are some potential optimization methods that we are considering:
+We will be implementing the below optimizations:
 - Branch prediction
 - Out-of-order execution
-- Cache optimizations
-- Superscalar execution
+- Register Renaming
 - Hardware prefetching
-- Multicore execution
-- Runahead execution
 
 # Simulation
 
@@ -26,3 +23,18 @@ We use the Following Packages
 5) Python3.6+
 
 The synthesis compiles system verilog design code into C code to make synthesis and execute.
+
+
+# Branch Predictor
+
+We have decided to make a neural network based perceptron branch predictor. Link to the paper reference: [perceptron](https://www.cs.utexas.edu/~lin/papers/hpca01.pdf).
+We will combine our GShare predictor with our perceptron branch predictor for the best accuracy.
+
+# Register Renaming
+
+# Out of Order Execution
+
+# Hardware Prefetching
+
+
+
