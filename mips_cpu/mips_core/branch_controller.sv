@@ -65,88 +65,88 @@ module branch_controller (
 
 endmodule
 
-module branch_predictor_always_not_taken (
-    input clk,    // Clock
-    input rst_n,  // Synchronous reset active low
+// module branch_predictor_always_not_taken (
+//     input clk,    // Clock
+//     input rst_n,  // Synchronous reset active low
 
-    // Request
-    input logic i_req_valid,
-    input logic [`ADDR_WIDTH - 1 : 0] i_req_pc,
-    input logic [`ADDR_WIDTH - 1 : 0] i_req_target,
-    output mips_core_pkg::BranchOutcome o_req_prediction,
+//     // Request
+//     input logic i_req_valid,
+//     input logic [`ADDR_WIDTH - 1 : 0] i_req_pc,
+//     input logic [`ADDR_WIDTH - 1 : 0] i_req_target,
+//     output mips_core_pkg::BranchOutcome o_req_prediction,
 
-    // Feedback
-    input logic i_fb_valid,
-    input logic [`ADDR_WIDTH - 1 : 0] i_fb_pc,
-    input mips_core_pkg::BranchOutcome i_fb_prediction,
-    input mips_core_pkg::BranchOutcome i_fb_outcome
-);
+//     // Feedback
+//     input logic i_fb_valid,
+//     input logic [`ADDR_WIDTH - 1 : 0] i_fb_pc,
+//     input mips_core_pkg::BranchOutcome i_fb_prediction,
+//     input mips_core_pkg::BranchOutcome i_fb_outcome
+// );
 
-    always_comb
-    begin
-        //o_req_prediction = NOT_TAKEN;
-        o_req_prediction = TAKEN;
-    end
+//     always_comb
+//     begin
+//         //o_req_prediction = NOT_TAKEN;
+//         o_req_prediction = TAKEN;
+//     end
 
-endmodule
+// endmodule
 
-module branch_predictor_2bit (
-    input clk,    // Clock
-    input rst_n,  // Synchronous reset active low
+// module branch_predictor_2bit (
+//     input clk,    // Clock
+//     input rst_n,  // Synchronous reset active low
 
-    // Request
-    input logic i_req_valid,
-    input logic [`ADDR_WIDTH - 1 : 0] i_req_pc,
-    input logic [`ADDR_WIDTH - 1 : 0] i_req_target,
-    output mips_core_pkg::BranchOutcome o_req_prediction,
+//     // Request
+//     input logic i_req_valid,
+//     input logic [`ADDR_WIDTH - 1 : 0] i_req_pc,
+//     input logic [`ADDR_WIDTH - 1 : 0] i_req_target,
+//     output mips_core_pkg::BranchOutcome o_req_prediction,
 
-    // Feedback
-    input logic i_fb_valid,
-    input logic [`ADDR_WIDTH - 1 : 0] i_fb_pc,
-    input mips_core_pkg::BranchOutcome i_fb_prediction,
-    input mips_core_pkg::BranchOutcome i_fb_outcome
-);
+//     // Feedback
+//     input logic i_fb_valid,
+//     input logic [`ADDR_WIDTH - 1 : 0] i_fb_pc,
+//     input mips_core_pkg::BranchOutcome i_fb_prediction,
+//     input mips_core_pkg::BranchOutcome i_fb_outcome
+// );
 
-    logic [1:0] counter;
+//     logic [1:0] counter;
 
-    task incr;
-        begin
-            if (counter != 2'b11)
-                counter <= counter + 2'b01;
-        end
-    endtask
+//     task incr;
+//         begin
+//             if (counter != 2'b11)
+//                 counter <= counter + 2'b01;
+//         end
+//     endtask
 
-    task decr;
-        begin
-            if (counter != 2'b00)
-                counter <= counter - 2'b01;
-        end
-    endtask
+//     task decr;
+//         begin
+//             if (counter != 2'b00)
+//                 counter <= counter - 2'b01;
+//         end
+//     endtask
 
-    always_ff @(posedge clk)
-    begin
-        if(~rst_n)
-        begin
-            counter <= 2'b01;   // Weakly not taken
-        end
-        else
-        begin
-            if (i_fb_valid)
-            begin
-                case (i_fb_outcome)
-                    NOT_TAKEN: decr();
-                    TAKEN:     incr();
-                endcase
-            end
-        end
-    end
+//     always_ff @(posedge clk)
+//     begin
+//         if(~rst_n)
+//         begin
+//             counter <= 2'b01;   // Weakly not taken
+//         end
+//         else
+//         begin
+//             if (i_fb_valid)
+//             begin
+//                 case (i_fb_outcome)
+//                     NOT_TAKEN: decr();
+//                     TAKEN:     incr();
+//                 endcase
+//             end
+//         end
+//     end
 
-    always_comb
-    begin
-        o_req_prediction = counter[1] ? TAKEN : NOT_TAKEN;
-    end
+//     always_comb
+//     begin
+//         o_req_prediction = counter[1] ? TAKEN : NOT_TAKEN;
+//     end
 
-endmodule
+// endmodule
 
 
 
@@ -165,7 +165,7 @@ module branch_predictor_global_share (
     input logic [`ADDR_WIDTH - 1 : 0] i_fb_pc,
     input mips_core_pkg::BranchOutcome i_fb_outcome
 );
-    parameter integer GHR_BITS = 8;  // Global History Register size
+    parameter integer GHR_BITS = 64;  // Global History Register size
     parameter integer PHT_ENTRIES = (1 << GHR_BITS); // Number of entries in PHT
 
     // Registers and Tables
@@ -174,21 +174,23 @@ module branch_predictor_global_share (
 
     // Prediction
     logic [1:0] prediction_counter;           // Counter value from PHT
+    logic [GHR_BITS-1:0] pht_index;           // Index into PHT (PC XOR GHR)
 
     // Initialization
     integer i;
-    initial begin
-        for (i = 0; i < PHT_ENTRIES; i++) begin
-            pht[i] = 2'b01; // Initialize all counters to weakly not taken
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (~rst_n) begin
+            ghr <= '0; // Reset GHR to zero
+            for (i = 0; i < PHT_ENTRIES; i++) begin
+                pht[i] <= 2'b01; // Initialize all counters to weakly not taken
+            end
         end
     end
 
     // Request Prediction
-    always_comb begin
-        // Index into the PHT using GHR
-        prediction_counter = pht[ghr];
-        o_req_prediction = (prediction_counter[1]) ? TAKEN : NOT_TAKEN;
-    end
+    assign pht_index = ghr ^ i_req_pc[GHR_BITS-1:0]; // XOR PC with GHR
+    assign prediction_counter = pht[pht_index];
+    assign o_req_prediction = (prediction_counter[1]) ? TAKEN : NOT_TAKEN;
 
     // Feedback and Updates
     always_ff @(posedge clk or negedge rst_n) begin
@@ -198,10 +200,10 @@ module branch_predictor_global_share (
             // Update the counter in PHT based on the outcome
             case (i_fb_outcome)
                 TAKEN: begin
-                    if (pht[ghr] != 2'b11) pht[ghr] <= pht[ghr] + 1; // Increment
+                    if (pht[pht_index] != 2'b11) pht[pht_index] <= pht[pht_index] + 1; // Increment
                 end
                 NOT_TAKEN: begin
-                    if (pht[ghr] != 2'b00) pht[ghr] <= pht[ghr] - 1; // Decrement
+                    if (pht[pht_index] != 2'b00) pht[pht_index] <= pht[pht_index] - 1; // Decrement
                 end
             endcase
 
