@@ -28,6 +28,7 @@ The synthesis compiles system verilog design code into C code to make synthesis 
 # Branch Predictor
 
 We have decided to make a neural network based perceptron branch predictor. Link to the paper reference: [perceptron](https://www.cs.utexas.edu/~lin/papers/hpca01.pdf).
+We will combine our GShare predictor with our perceptron branch predictor for the best accuracy.
 
 # Register Renaming
 
