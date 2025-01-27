@@ -13,6 +13,9 @@ module branch_predictorTL(
     output logic prediction
 );
 
+perceptron_calc percep (.*);
+perceptron_trainer trainer(.*);
+weight_table table(.*);
 
 
 
