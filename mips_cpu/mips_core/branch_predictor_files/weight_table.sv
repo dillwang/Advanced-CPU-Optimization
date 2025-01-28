@@ -3,7 +3,6 @@ module weight_table(
     input clk,
     input rst_n,
     pc_ifc.in dec_pc,
-    
     input logic update_enable,
     input logic signed [WIDTH-1:0] weight_update [N],
     output reg signed [WIDTH-1:0] weights [N]
@@ -25,6 +24,9 @@ module weight_table(
     TODO: IMPLEMENT HASH, JUST NEED ADDRESS/PC WIDTH
     HASH FUNCTION TO BE IMPLEMENTED HERE
     */
+
+    function int hash(input logic [`ADDR_WIDTH-1:1] pc);
+        return ([ADDR_WIDTH-1:2]pc ^ [`ADDR_WIDTH-1:1]history)
 
 
     // weights
