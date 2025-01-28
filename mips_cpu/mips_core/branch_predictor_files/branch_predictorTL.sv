@@ -16,6 +16,7 @@ module branch_predictorTL(
 perceptron_calc percep (.*);
 perceptron_trainer trainer(.*);
 weight_table table(.*);
+ghr history_reg(.*);
 
 
 

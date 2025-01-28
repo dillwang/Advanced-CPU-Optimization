@@ -2,7 +2,7 @@ module ghr(
 
     input clk,
     input rst_n,
-    input logic branch_outcome,
+    branch_result_ifc.in ex_branch_result,
     output reg history
 
 );
@@ -18,7 +18,7 @@ module ghr(
             end
         end
         else begin
-            history_table <= {history_table[HISTORY_SIZE-2:0], branch_outcome};
+            history_table <= {history_table[HISTORY_SIZE-2:0], ex_branch_result};
         end
     end
 

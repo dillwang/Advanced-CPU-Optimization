@@ -3,7 +3,7 @@ module perceptron_trainer(
 input clk,
 input rst_n,
 input logic prediction,
-input logic branch_outcome,
+branch_result_ifc.in ex_branch_result,
 input logic [PERCEPTRON_NUMBER-1: 0] history,
 input logic signed [WIDTH-1:0] weights [PERCEPTRON_NUMBER],
 output reg signed [WIDTH-1:0] weight_update [PERCEPTRON_NUMBER]
@@ -20,7 +20,7 @@ output reg signed [WIDTH-1:0] weight_update [PERCEPTRON_NUMBER]
     reg theta;
 
     integer i;
-    logic match = branch_outcome ~^ prediction;
+    logic match = ex_branch_result ~^ prediction;
     always_ff @(posedge clk or ~rst_n) begin
         if(~rst_n) begin
             for (i = 0; i < WEIGHT_NUMBER; i++) begin
@@ -29,7 +29,7 @@ output reg signed [WIDTH-1:0] weight_update [PERCEPTRON_NUMBER]
             theta <= 0;
         end else if(~match || (theta < THRESHOLD)) begin
                 for (i = 0; i < WEIGHT_NUMBER; i++) begin
-                    weight_update[i] <= weights[i] + (branch_outcome ~^ history[i] ? 1 : -1);
+                    weight_update[i] <= weights[i] + (ex_branch_result ~^ history[i] ? 1 : -1);
                 end
                 theta <= theta + 1;
         end
