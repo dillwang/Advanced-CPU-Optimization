@@ -25,6 +25,7 @@ module branch_controller (
     logic request_prediction;
 
     // Change the following line to switch predictor
+
     // branch_predictor_always_not_taken PREDICTOR (
     //     .clk, .rst_n,
 
@@ -39,19 +40,17 @@ module branch_controller (
     //     .i_fb_outcome    (ex_branch_result.outcome)
     // );
 
-    branch_predictor_global_share PREDICTOR (
-    .clk,
-    .rst_n,
-
+    branch_predictor_gshare PREDICTOR (
+    .clk, .rst_n,
     .i_req_valid     (request_prediction),
     .i_req_pc        (dec_pc.pc),
-    .i_req_target    (dec_branch_decoded.target),
     .o_req_prediction(dec_branch_decoded.prediction),
 
     .i_fb_valid      (ex_branch_result.valid),
     .i_fb_pc         (ex_pc.pc),
     .i_fb_outcome    (ex_branch_result.outcome)
 );
+
 
 
     always_comb
@@ -64,6 +63,9 @@ module branch_controller (
     end
 
 endmodule
+
+
+
 
 module branch_predictor_always_not_taken (
     input clk,    // Clock
@@ -89,6 +91,9 @@ module branch_predictor_always_not_taken (
     end
 
 endmodule
+
+
+
 
 module branch_predictor_2bit (
     input clk,    // Clock
@@ -149,15 +154,13 @@ module branch_predictor_2bit (
 endmodule
 
 
-
-module branch_predictor_global_share (
+module branch_predictor_gshare (
     input clk,    // Clock
-    input rst_n,  // Reset active low
+    input rst_n,  // Synchronous reset active low
 
     // Request
     input logic i_req_valid,
     input logic [`ADDR_WIDTH - 1 : 0] i_req_pc,
-    input logic [`ADDR_WIDTH - 1 : 0] i_req_target,
     output mips_core_pkg::BranchOutcome o_req_prediction,
 
     // Feedback
@@ -165,50 +168,51 @@ module branch_predictor_global_share (
     input logic [`ADDR_WIDTH - 1 : 0] i_fb_pc,
     input mips_core_pkg::BranchOutcome i_fb_outcome
 );
-    parameter integer GHR_BITS = 8;  // Global History Register size
-    parameter integer PHT_ENTRIES = (1 << GHR_BITS); // Number of entries in PHT
+    // Parameters
+    parameter GR_WIDTH = 16;      // Width of the global history register
+    parameter TABLE_SIZE = 65536;  // Number of entries in the predictor table
+    parameter INDEX_WIDTH = $clog2(TABLE_SIZE);
 
-    // Registers and Tables
-    logic [GHR_BITS-1:0] ghr;                 // Global History Register
-    logic [1:0] pht [0:PHT_ENTRIES-1];        // Pattern History Table
+    // Signals
+    logic [GR_WIDTH-1:0] global_history;   // Global history register
+    logic [INDEX_WIDTH-1:0] index;         // Index into the table
+    logic [1:0] counters [TABLE_SIZE-1:0]; // Predictor table of 2-bit counters
 
-    // Prediction
-    logic [1:0] prediction_counter;           // Counter value from PHT
+    // Generate index by XORing global history with lower bits of PC
+    assign index = (i_req_pc[`ADDR_WIDTH-1:`ADDR_WIDTH-INDEX_WIDTH] ^ global_history);
 
-    // Initialization
-    integer i;
-    initial begin
-        for (i = 0; i < PHT_ENTRIES; i++) begin
-            pht[i] = 2'b01; // Initialize all counters to weakly not taken
+    // Predict branch outcome based on the most significant bit of the counter
+    assign o_req_prediction = counters[index][1] ? TAKEN : NOT_TAKEN;
+
+    // Reset logic
+    always_ff @(posedge clk or negedge rst_n)
+    begin
+        if (~rst_n)
+        begin
+            global_history <= '0;
+            for (int i = 0; i < TABLE_SIZE; i++) begin
+                counters[i] = 2'b01; // Initialize all counters to weakly not taken
+            end
         end
-    end
+        else
+        begin
+            // Update global history and counters on feedback
+            if (i_fb_valid)
+            begin
+                // Update global history
+                global_history <= {global_history[GR_WIDTH-2:0], i_fb_outcome == TAKEN};
 
-    // Request Prediction
-    always_comb begin
-        // Index into the PHT using GHR
-        prediction_counter = pht[ghr];
-        o_req_prediction = (prediction_counter[1]) ? TAKEN : NOT_TAKEN;
-    end
-
-    // Feedback and Updates
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (~rst_n) begin
-            ghr <= '0; // Reset GHR to zero
-        end else if (i_fb_valid) begin
-            // Update the counter in PHT based on the outcome
-            case (i_fb_outcome)
-                TAKEN: begin
-                    if (pht[ghr] != 2'b11) pht[ghr] <= pht[ghr] + 1; // Increment
-                end
-                NOT_TAKEN: begin
-                    if (pht[ghr] != 2'b00) pht[ghr] <= pht[ghr] - 1; // Decrement
-                end
-            endcase
-
-            // Update the GHR by shifting in the feedback outcome
-            ghr <= {ghr[GHR_BITS-2:0], i_fb_outcome};
+                // Update the saturating counter
+                case (i_fb_outcome)
+                    TAKEN:
+                        if (counters[index] != 2'b11)
+                            counters[index] <= counters[index] + 1;
+                    NOT_TAKEN:
+                        if (counters[index] != 2'b00)
+                            counters[index] <= counters[index] - 1;
+                endcase
+            end
         end
     end
 
 endmodule
-
