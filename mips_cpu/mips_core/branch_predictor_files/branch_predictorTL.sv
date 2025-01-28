@@ -18,6 +18,4 @@ perceptron_trainer trainer(.*);
 weight_table table(.*);
 ghr history_reg(.*);
 
-
-
 endmodule

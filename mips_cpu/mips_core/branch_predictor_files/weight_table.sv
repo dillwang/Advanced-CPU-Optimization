@@ -2,6 +2,8 @@ module weight_table(
 
     input clk,
     input rst_n,
+    pc_ifc.in dec_pc,
+    
     input logic update_enable,
     input logic signed [WIDTH-1:0] weight_update [N],
     output reg signed [WIDTH-1:0] weights [N]
@@ -23,6 +25,7 @@ module weight_table(
     TODO: IMPLEMENT HASH, JUST NEED ADDRESS/PC WIDTH
     HASH FUNCTION TO BE IMPLEMENTED HERE
     */
+
 
     // weights
     always_comb begin

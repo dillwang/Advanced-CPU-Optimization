@@ -82,7 +82,7 @@ module branch_predictor_always_not_taken (
 //     input logic [`ADDR_WIDTH - 1 : 0] i_fb_pc,
 //     input mips_core_pkg::BranchOutcome i_fb_prediction,
 //     input mips_core_pkg::BranchOutcome i_fb_outcome
-// );
+ );
 
 //     always_comb
 //     begin

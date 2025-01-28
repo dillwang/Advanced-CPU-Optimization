@@ -12,12 +12,15 @@ parameter int PERCEPTRON_NUMBER = 62;
 parameter int WIDTH = 8;
 
 integer i;
+integer idx;
 reg signed [31:0] sum;
+
+
 
 always_comb begin
     sum = 0;
     for(i = 0; i < PERCEPTRON_NUMBER; i++) begin
-        sum = sum + (history[i] ? weights[i] : -weights[i]);
+        sum = sum + (history[idx][i] ? weights[idx][i] : -weights[idx][i]);
     end
 end
 
