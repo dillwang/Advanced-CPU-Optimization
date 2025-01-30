@@ -335,13 +335,14 @@ module d_cache #(
 
 
     //HIT AND MISS COUNTERS
-    always_ff @(posedge clk)
-    begin
-        if(hit) stats_event("D-Cache_hit");
-        if(miss) stats_event("D-Cache_miss");
-        if(in.valid) stats_event("D-Cache_access");
-    end
-
+    `ifdef SIMULATION
+        always_ff @(posedge clk)
+        begin
+            if(hit) stats_event("D-Cache_hit");
+            if(miss) stats_event("D-Cache_miss");
+            if(in.valid) stats_event("D-Cache_access");
+        end
+    `endif
     always_ff @(posedge clk)
     begin
         if(~rst_n)
