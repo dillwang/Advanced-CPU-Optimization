@@ -41,7 +41,7 @@ endinterface
 module d_cache #(
     parameter INDEX_WIDTH = 6,  // 2 * 1 KB Cache Size
     parameter BLOCK_OFFSET_WIDTH = 2,
-    parameter ASSOCIATIVITY = 4
+    parameter ASSOCIATIVITY = 2
     )(
     // General signals
     input clk,    // Clock
