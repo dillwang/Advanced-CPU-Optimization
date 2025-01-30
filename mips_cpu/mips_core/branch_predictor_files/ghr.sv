@@ -3,7 +3,7 @@ module ghr(
     input clk,
     input rst_n,
     branch_result_ifc.in ex_branch_result,
-    output reg history
+    output reg [HISTORY_SIZE-1:0]history
 
 );
 
