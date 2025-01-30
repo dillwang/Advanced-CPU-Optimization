@@ -1,4 +1,4 @@
-module ghr(
+module ghr #(parameter int HISTORY_SIZE)(
 
     input clk,
     input rst_n,
@@ -7,7 +7,6 @@ module ghr(
 
 );
 
-    parameter int HISTORY_SIZE = 64;
 
     always_ff@(posedge clk or ~rst_n) begin
         if(~rst_n) begin

@@ -1,5 +1,5 @@
 
-module perceptron_calc(
+module perceptron_calc #(parameter int HISTORY_SIZE, int PERCEPTRON, int WEIGHT_NUMBER, int WIDTH)(
 input clk,
 input rst_n,
 input logic [HISTORY_SIZE-1:0] history,
@@ -9,10 +9,7 @@ output logic prediction
 );
 
 
-parameter int PERCEPTRON_NUMBER = 64;
-parameter int WEIGHT_NUMBER = 65; // HISTORY_SIZE + 1 (bias term)
-parameter int WIDTH = 8;
-parameter int HISTORY_SIZE = 64;
+
 
 reg signed [31:0] sum;
 

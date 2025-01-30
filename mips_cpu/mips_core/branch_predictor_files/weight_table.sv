@@ -1,4 +1,5 @@
-module weight_table(
+module weight_table #(parameter int PERCEPTRON_NUMBER, int WEIGHT_NUMBER,
+                     int HISTORY_SIZE, int WIDTH)(
 
     input clk,
     input rst_n,
@@ -11,11 +12,6 @@ module weight_table(
 
 );
 
-    //PARAMETERS
-    parameter int WEIGHT_NUMBER = 65; //N + 1 for bias term
-    parameter int PERCEPTRON_NUMBER = 64;
-    parameter int WIDTH = 8;
-    parameter int HISTORY_SIZE = 64;
 
 
 

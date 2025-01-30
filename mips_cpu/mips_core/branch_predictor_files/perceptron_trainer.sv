@@ -1,4 +1,5 @@
-module perceptron_trainer(
+module perceptron_trainer #(parameter int PERCEPTRON_NUMBER, int WEIGHT_NUMBER,
+                             int HISTORY_SIZE, int WIDTH)(
 
 input clk,
 input rst_n,
@@ -11,10 +12,7 @@ output logic signed [WIDTH-1:0] weight_update [PERCEPTRON_NUMBER][WEIGHT_NUMBER]
 );
 
     //PARAMETERS
-    parameter int WEIGHT_NUMBER = 65;
-    parameter int PERCEPTRON_NUMBER = 64;
-    parameter int WIDTH = 8;
-    parameter int HISTORY_SIZE = 64;
+
 
    localparam int THRESHOLD = FLOOR(1.93 * HISTORY_SIZE + 14);
 
