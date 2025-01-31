@@ -18,7 +18,7 @@ module perceptron_predictor (
 //parameters
     parameter int HISTORY_SIZE = 62;
     parameter int PERCEPTRON_NUMBER = 1024;
-    parameter int WEIGHT_NUMBER = 63;
+    parameter int WEIGHT_NUMBER = HISTORY_SIZE + 1;
     parameter int WEIGHT_BITS = 8;
     localparam THRESHOLD = int'(1.93*HISTORY_SIZE + 14);
 
