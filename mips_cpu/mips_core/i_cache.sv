@@ -98,8 +98,14 @@ module i_cache #(
     logic [INDEX_WIDTH - 1 : 0] databank_raddr;
     logic [`DATA_WIDTH - 1 : 0] databank_rdata [ASSOCIATIVITY][LINE_SIZE];
 
+    logic select_way;
+    logic r_select_way;
+    logic [DEPTH - 1 : 0] lru_rp;
+
+
+
     // databanks
-    genvar g;
+    genvar g,w;
     generate
         for (g = 0; g < LINE_SIZE; g++)
         begin : datasets
@@ -122,41 +128,66 @@ module i_cache #(
     endgenerate
 
     // tagbank signals
-    logic tagbank_we;
+    logic tagbank_we[ASSOCIATIVITY];
     logic [TAG_WIDTH - 1 : 0] tagbank_wdata;
     logic [INDEX_WIDTH - 1 : 0] tagbank_waddr;
     logic [INDEX_WIDTH - 1 : 0] tagbank_raddr;
-    logic [TAG_WIDTH - 1 : 0] tagbank_rdata;
+    logic [TAG_WIDTH - 1 : 0] tagbank_rdata[ASSOCIATIVITY];
 
-    cache_bank #(
-        .DATA_WIDTH (TAG_WIDTH),
-        .ADDR_WIDTH (INDEX_WIDTH)
-    ) tagbank (
-        .clk,
-        .i_we    (tagbank_we),
-        .i_wdata (tagbank_wdata),
-        .i_waddr (tagbank_waddr),
-        .i_raddr (tagbank_raddr),
+    generate
+        for (w=0; w< ASSOCIATIVITY; w++)
+        begin: tagbanks
+            cache_bank #(
+                .DATA_WIDTH (TAG_WIDTH),
+                .ADDR_WIDTH (INDEX_WIDTH)
+            ) tagbank (
+                .clk,
+                .i_we    (tagbank_we[w]),
+                .i_wdata (tagbank_wdata),
+                .i_waddr (tagbank_waddr),
+                .i_raddr (tagbank_raddr),
 
-        .o_rdata (tagbank_rdata)
-    );
+                .o_rdata (tagbank_rdata[w])
+            );
+        end
+    endgenerate
 
     // Valid bits
-    logic [DEPTH - 1 : 0] valid_bits;
+    logic [DEPTH - 1 : 0] valid_bits[ASSOCIATIVITY];
 
     // Intermediate signals
-    logic hit, miss;
+    logic hit, miss, tag_hit;
     logic last_refill_word;
 
 
     always_comb
     begin
-        hit = valid_bits[i_index]
-            & (i_tag == tagbank_rdata)
-            & (state == STATE_READY);
+        tag_hit = ( ((i_tag == tagbank_rdata[0]) & valid_bits[0][i_index])
+                  | ((i_tag == tagbank_rdata[1]) & valid_bits[1][i_index]));
+        hit = (tag_hit) & (state == STATE_READY);
         miss = ~hit;
-        last_refill_word = databank_select[LINE_SIZE - 1]
-            & mem_read_data.RVALID;
+        last_refill_word = databank_select[LINE_SIZE - 1] & mem_read_data.RVALID;
+
+        if (hit)
+        begin
+            if (i_tag == tagbank_rdata[0])
+            begin
+                select_way = 'b0;
+            end
+            else
+            begin
+                select_way = 'b1;
+            end
+        end
+        else if (miss)
+        begin
+            select_way = lru_rp[i_index];
+        end
+        else
+        begin
+            select_way = 'b0;
+        end
+        
     end
 
     always_comb
@@ -171,21 +202,30 @@ module i_cache #(
         mem_read_data.RREADY = 1'b1;
     end
 
+    // NOT SURE ABOUT THIS!
     always_comb
     begin
-        if (mem_read_data.RVALID)
-            databank_we = databank_select;
-        else
-            databank_we = '0;
+        for (int i=0; i<ASSOCIATIVITY;i++)
+            databank_we[i] = '0;
+        if (state == STATE_REFILL_DATA && mem_read_data.RVALID)
+            databank_we[r_select_way] = databank_select; // Only during refill
 
         databank_wdata = mem_read_data.RDATA;
         databank_waddr = r_index;
-        databank_raddr = i_index_next;
+        if (next_state == STATE_READY)
+                databank_raddr = i_index_next;
+            else
+                databank_raddr = r_index;
     end
 
     always_comb
     begin
-        tagbank_we = last_refill_word;
+        for (int i = 0; i < ASSOCIATIVITY; i++)
+            tagbank_we[i] = 1'b0;
+
+        if (last_refill_word)
+            tagbank_we[r_select_way] = 1'b1;
+    
         tagbank_wdata = r_tag;
         tagbank_waddr = r_index;
         tagbank_raddr = i_index_next;
@@ -194,7 +234,7 @@ module i_cache #(
     always_comb
     begin
         out.valid = hit;
-        out.data = databank_rdata[i_block_offset];
+        out.data = databank_rdata[select_way][i_block_offset];
     end
 
     always_comb
@@ -219,7 +259,10 @@ module i_cache #(
         begin
             state <= STATE_READY;
             databank_select <= 1;
-            valid_bits <= '0;
+            for (int i=0; i<ASSOCIATIVITY;i++)
+                valid_bits[i] <= '0;
+            for (int i=0; i<DEPTH;i++)
+                lru_rp[i] <= 0;
         end
         else
         begin
@@ -232,6 +275,7 @@ module i_cache #(
                     begin
                         r_tag <= i_tag;
                         r_index <= i_index;
+                        r_select_way <= select_way;
                     end
                 end
                 STATE_REFILL_REQUEST:
@@ -240,20 +284,48 @@ module i_cache #(
                 STATE_REFILL_DATA:
                 begin
                     if (mem_read_data.RVALID)
-                    begin
                         databank_select <= {databank_select[LINE_SIZE - 2 : 0],
                             databank_select[LINE_SIZE - 1]};
-                        valid_bits[r_index] <= last_refill_word;
+
+                    if (last_refill_word)
+                    begin
+                        valid_bits[r_select_way][r_index] <= 1'b1;
+                        valid_bits[~r_select_way][r_index] <= valid_bits[~r_select_way][r_index]; // Retain the other way's valid bit
                     end
                 end
             endcase
         end
     end
-    `ifdef SIMULATION
-        always_ff @(posedge clk)
+
+    always_ff @(posedge clk)
+    begin
+        if (~rst_n)
         begin
-            if(hit) stats_event("I-Cache_hit");
-            if(miss) stats_event("I-Cache_miss");
+            for (int i=0; i<DEPTH; i++)
+                lru_rp[i] <= 0; // Initialize LRU bit
         end
-    `endif
+        else
+        begin
+            case (state)
+                STATE_READY:
+                begin
+                    if (hit)
+                    begin
+                        lru_rp[i_index] <= (select_way == 1'b0) ? 1'b1 : 1'b0; // Mark recently used way
+                    end
+                    else if (miss)
+                    begin
+                        lru_rp[i_index] <= r_select_way; // Store the replaced way as recently used
+                    end
+                end
+            endcase
+        end
+    end
+
+
+    always_ff @(posedge clk)
+    begin
+        if(hit) stats_event("I-Cache_hit");
+        if(miss) stats_event("I-Cache_miss");
+    end
 endmodule
