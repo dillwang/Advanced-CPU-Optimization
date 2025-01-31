@@ -27,7 +27,8 @@
 
 module i_cache #(
     parameter INDEX_WIDTH = 6, // 1 KB Cahe size
-    parameter BLOCK_OFFSET_WIDTH = 2
+    parameter BLOCK_OFFSET_WIDTH = 2,
+    parameter ASSOCIATIVITY = 2
     )(
     // General signals
     input clk,    // Clock
@@ -91,29 +92,32 @@ module i_cache #(
 
     // databank signals
     logic [LINE_SIZE - 1 : 0] databank_select;
-    logic [LINE_SIZE - 1 : 0] databank_we;
+    logic [LINE_SIZE - 1 : 0] databank_we[ASSOCIATIVITY];
     logic [`DATA_WIDTH - 1 : 0] databank_wdata;
     logic [INDEX_WIDTH - 1 : 0] databank_waddr;
     logic [INDEX_WIDTH - 1 : 0] databank_raddr;
-    logic [`DATA_WIDTH - 1 : 0] databank_rdata [LINE_SIZE];
+    logic [`DATA_WIDTH - 1 : 0] databank_rdata [ASSOCIATIVITY][LINE_SIZE];
 
     // databanks
     genvar g;
     generate
         for (g = 0; g < LINE_SIZE; g++)
-        begin : databanks
-            cache_bank #(
-                .DATA_WIDTH (`DATA_WIDTH),
-                .ADDR_WIDTH (INDEX_WIDTH)
-            ) databank (
-                .clk,
-                .i_we (databank_we[g]),
-                .i_wdata(databank_wdata),
-                .i_waddr(databank_waddr),
-                .i_raddr(databank_raddr),
+        begin : datasets
+            for (w=0; w< ASSOCIATIVITY; w++)
+            begin : databanks
+                cache_bank #(
+                    .DATA_WIDTH (`DATA_WIDTH),
+                    .ADDR_WIDTH (INDEX_WIDTH)
+                ) databank (
+                    .clk,
+                    .i_we (databank_we[w][g]),
+                    .i_wdata(databank_wdata),
+                    .i_waddr(databank_waddr),
+                    .i_raddr(databank_raddr),
 
-                .o_rdata(databank_rdata[g])
-            );
+                    .o_rdata(databank_rdata[w][g])
+                );
+            end
         end
     endgenerate
 
