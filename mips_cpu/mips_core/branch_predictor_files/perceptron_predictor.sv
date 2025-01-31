@@ -57,3 +57,53 @@ module perceptron_predictor (
 //perceptron index
     assign perceptron_index = hash(i_req_valid ? i_req_pc : i_fb_pc);
     
+//prediction calc
+    always_comb begin
+        perceptron_sum = weights[perceptron_index][0]; //bias term
+        for(int i = 1; i < WEIGHT_NUMBER; i++) begin
+            perceptron_sum += ghr[i-1] ?
+                weights[perceptron_index][i] :
+                -weights[perceptron_index][i];
+        end
+    o_req_prediction = (perceptron_sum >= 0) ? TAKEN : NOT_TAKEN;
+    end
+
+//weight update
+
+    always_ff @(posedge clk or ~rst_n) begin
+        if(~rst_n) begin
+            //init weights to 0
+            foreach(weights[i, j] weights[i][j] <= 0);
+        end else if(i_fb_valid) begin
+            if((o_req_prediction != i_fb_outcome) ||
+                    ($abs(perceptron_sum) <= THRESHOLD)) begin
+                for(int i = 0; i < WEIGHT_NUMBER; i++) begin
+                    logic hbit = (i == 0) ? 1'b1 : ghr[i-1];
+                    if (i_fb_outcome == TAKEN) begin
+                        weights[perceptron_index][i] <= 
+                            $saturate(weights[perceptron_index][i] + (hbit ? 1 : -1));
+                    end else begin
+                        weights[perceptron_index][i] <= 
+                            $saturate(weights[perceptron_index][i] + (hbit ? -1 : 1));
+                    end
+                end
+            end
+        end
+    end
+
+    //saturate weights to avoid overflow
+
+    function logic signed [WEIGHT_BITS-1:0] $saturate(input logic signed [31:0] value);
+        if(value > (2**(WEIGHT_BITS-1))-1) begin
+            return (2**(WEIGHT_BITS-1))-1;
+        end 
+        else if (value < -(2**(WEIGHT_BITS-1))) begin
+            return -(2**(WEIGHT_BITS-1));
+        end
+        else begin
+            return value[WEIGHT_BITS-1:0];
+        end
+    endfunction
+
+endmodule
+
