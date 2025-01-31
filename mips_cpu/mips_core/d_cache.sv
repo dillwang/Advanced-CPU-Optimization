@@ -41,7 +41,7 @@ endinterface
 module d_cache #(
     parameter INDEX_WIDTH = 6,  // 2 * 1 KB Cache Size
     parameter BLOCK_OFFSET_WIDTH = 2,
-    parameter ASSOCIATIVITY = 4
+    parameter ASSOCIATIVITY = 2
     )(
     // General signals
     input clk,    // Clock
@@ -335,13 +335,14 @@ module d_cache #(
 
 
     //HIT AND MISS COUNTERS
-    always_ff @(posedge clk)
-    begin
-        if(hit) stats_event("D-Cache_hit");
-        if(miss) stats_event("D-Cache_miss");
-        if(in.valid) stats_event("D-Cache_access");
-    end
-
+    `ifdef SIMULATION
+        always_ff @(posedge clk)
+        begin
+            if(hit) stats_event("D-Cache_hit");
+            if(miss) stats_event("D-Cache_miss");
+            if(in.valid) stats_event("D-Cache_access");
+        end
+    `endif
     always_ff @(posedge clk)
     begin
         if(~rst_n)

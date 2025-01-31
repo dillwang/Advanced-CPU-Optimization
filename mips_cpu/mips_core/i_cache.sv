@@ -249,10 +249,11 @@ module i_cache #(
             endcase
         end
     end
-
-    always_ff @(posedge clk)
-    begin
-        if(hit) stats_event("I-Cache_hit");
-        if(miss) stats_event("I-Cache_miss");
-    end
+    `ifdef SIMULATION
+        always_ff @(posedge clk)
+        begin
+            if(hit) stats_event("I-Cache_hit");
+            if(miss) stats_event("I-Cache_miss");
+        end
+    `endif
 endmodule
