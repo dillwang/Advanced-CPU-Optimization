@@ -9,6 +9,7 @@
  * See wiki page "Branch and Jump" for details.
  */
 `include "mips_core.svh"
+`include "branch_predictor_files/perceptron_predictor.sv"
 
 module branch_controller (
     input clk,    // Clock
@@ -40,7 +41,7 @@ module branch_controller (
     //     .i_fb_outcome    (ex_branch_result.outcome)
     // );
 
-    branch_predictor_gshare PREDICTOR (
+    perceptron_predictor PREDICTOR (
     .clk, .rst_n,
     .i_req_valid     (request_prediction),
     .i_req_pc        (dec_pc.pc),
