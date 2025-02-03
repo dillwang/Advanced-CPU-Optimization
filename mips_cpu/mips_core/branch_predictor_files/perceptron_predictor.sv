@@ -105,7 +105,7 @@ end
 
     //saturate weights to avoid overflow
 
-    function logic signed [WEIGHT_BITS-1:0] saturate(input logic signed [31:0] value);
+    function logic automatic signed [WEIGHT_BITS-1:0] saturate(input logic signed [31:0] value);
         if(value > (2**(WEIGHT_BITS-1))-1) begin
             return (2**(WEIGHT_BITS-1))-1;
         end
@@ -117,7 +117,7 @@ end
         end
     endfunction
 
-    function logic signed abs [31:0] abs(input logic signed [31:0] val);
+    function logic automatic signed [31:0] abs(input logic signed [31:0] val);
         return (val >= 0) ? val : -val;
     endfunction
 
