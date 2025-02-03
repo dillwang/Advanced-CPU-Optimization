@@ -32,10 +32,11 @@ module perceptron_predictor (
 //prediction calc
     logic signed [31:0] perceptron_sum;
     logic signed [31:0] stored_perceptron_sum;
+    logic signed [31:0] perceptron_threshold;
     logic [$clog2(PERCEPTRON_NUMBER)-1:0] perceptron_index;
 
 //hash
-    function int hash(input logic [`ADDR_WIDTH-1:0] pc);
+    function automatic int hash(input logic [`ADDR_WIDTH-1:0] pc);
             logic [23:0] pc_bits = pc[25:2];
             logic [23:0] history_bits = ghr[23:0];
             return (pc_bits ^ history_bits) % (PERCEPTRON_NUMBER);
@@ -74,7 +75,7 @@ end
                 -weights[perceptron_index][i];
         end
     o_req_prediction = (perceptron_sum >= 0) ? TAKEN : NOT_TAKEN;
-    perceptron_threshold <= perceptron_sum;
+    perceptron_threshold = perceptron_sum;
     end
 
 //weight update
@@ -87,7 +88,7 @@ end
             end
         end else if(i_fb_valid) begin
             if((o_req_prediction != i_fb_outcome) ||
-                    ($abs(perceptron_threshold) <= THRESHOLD)) begin
+                    (abs(perceptron_threshold) <= THRESHOLD)) begin
                 for(int i = 0; i < WEIGHT_NUMBER; i++) begin
                     logic hbit = (i == 0) ? 1'b1 : ghr[i-1];
                     if (i_fb_outcome == TAKEN) begin
@@ -114,6 +115,10 @@ end
         else begin
             return value[WEIGHT_BITS-1:0];
         end
+    endfunction
+
+    function logic signed abs [31:0] abs(input logic signed [31:0] val);
+        return (val >= 0) ? val : -val;
     endfunction
 
 endmodule
