@@ -91,6 +91,7 @@ end
             for(int i = 0; i < PERCEPTRON_NUMBER; i++) begin
                 for(int j = 0; j < WEIGHT_NUMBER; j++) begin
                     weights[i][j] <= 0;
+                end
             end
         end else if(i_fb_valid) begin
             if((o_req_prediction != i_fb_outcome) ||
