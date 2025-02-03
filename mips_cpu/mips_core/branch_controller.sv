@@ -67,7 +67,7 @@ endmodule
 
 
 
-
+/*
 module branch_predictor_always_not_taken (
     input clk,    // Clock
     input rst_n,  // Synchronous reset active low
@@ -93,7 +93,7 @@ module branch_predictor_always_not_taken (
 
 endmodule
 
-
+*/
 
 
 module branch_predictor_2bit (
