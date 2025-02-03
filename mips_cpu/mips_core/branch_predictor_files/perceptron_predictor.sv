@@ -82,7 +82,9 @@ end
     always_ff @(posedge clk or negedge rst_n) begin
         if(~rst_n) begin
             //init weights to 0
-            foreach(weights[i, j] weights[i][j] <= 0);
+            foreach(weights[i, j]) begin
+                weights[i][j] <= 0;
+            end
         end else if(i_fb_valid) begin
             if((o_req_prediction != i_fb_outcome) ||
                     ($abs(perceptron_threshold) <= THRESHOLD)) begin
