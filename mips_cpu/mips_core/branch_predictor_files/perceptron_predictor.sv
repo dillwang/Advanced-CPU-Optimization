@@ -83,8 +83,14 @@ end
     always_ff @(posedge clk or negedge rst_n) begin
         if(~rst_n) begin
             //init weights to 0
+            /*
             foreach(weights[i, j]) begin
                 weights[i][j] <= 0;
+            end
+            */
+            for(int i = 0; i < PERCEPTRON_NUMBER; i++) begin
+                for(int j = 0, j < WEIGHT_NUMBER, j++) begin
+                    weights[i][j] <= 0;
             end
         end else if(i_fb_valid) begin
             if((o_req_prediction != i_fb_outcome) ||
