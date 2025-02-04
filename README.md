@@ -30,6 +30,10 @@ The synthesis compiles system verilog design code into C code to make synthesis 
 We have decided to make a neural network based perceptron branch predictor. Link to the paper reference: [perceptron](https://www.cs.utexas.edu/~lin/papers/hpca01.pdf).
 We will combine our GShare predictor with our perceptron branch predictor for the best accuracy.
 
+The Perceptron and the Gshare are both finished. Here is a screenshot of their accuracy:
+
+
+
 # Register Renaming
 
 # Out of Order Execution
