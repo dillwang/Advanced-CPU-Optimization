@@ -31,6 +31,8 @@ We have decided to make a neural network based perceptron branch predictor. Link
 We will combine our GShare predictor with our perceptron branch predictor for the best accuracy.
 
 The Perceptron and the Gshare are both finished. Here is a screenshot of their accuracy:
+![image](https://github.com/user-attachments/assets/a88fff39-ef96-4a6d-b27d-6a73976f5192)
+
 
 
 
