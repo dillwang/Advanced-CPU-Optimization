@@ -7,6 +7,10 @@ We will be implementing the below optimizations:
 - Register Renaming
 - Hardware prefetching
 
+# Baseline
+
+We are starting with a standard 5-stage pipelined baseline CPU with a basic static branch predictor.
+
 # Simulation
 
 1.) oss-cad-suite https://github.com/YosysHQ/oss-cad-suite-build open-source binary release.
