@@ -10,6 +10,30 @@ We will be implementing the below optimizations:
 # Baseline
 
 We are starting with a standard 5-stage pipelined baseline CPU with a basic static branch predictor.
+![image](https://github.com/user-attachments/assets/92958813-c3e5-4a26-98b2-04022365c847)
+Features
+
+    Pipeline Stages: Implements a classical five-stage pipeline with hazard handling.
+    Instruction & Data Caches: Includes I-Cache and D-Cache modules for efficient memory access.
+    Hazard Handling:
+        Data hazards: Managed via a forwarding unit.
+        Control hazards: Mitigated with a branch predictor and a branch controller.
+    AXI Memory Arbiter: Provides memory access management for the pipeline.
+    Modular Design: The architecture is built using SystemVerilog, allowing flexibility in modifications and extensions.
+
+Code Structure
+
+    fetch_unit.sv - Fetch stage logic
+    decoder.sv - Instruction decoding
+    reg_file.sv - Register file implementation
+    alu.sv - Arithmetic and logical operations
+    forward_unit.sv - Data hazard forwarding
+    hazard_controller.sv - Overall hazard management
+    branch_controller.sv - Branch control logic
+    glue_circuits.sv - Pipeline stage interconnections
+    memory_arbiter.sv - AXI memory management
+
+
 
 # Simulation
 
