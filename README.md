@@ -3,8 +3,8 @@
 This is an on going CPU architecture design group project that primarily focus on implementing modern state of the art optimization methods to speedup a simple baseline CPU architecture.
 We will be implementing the below optimizations:
 - Branch prediction
-- Out-of-order execution
 - Register Renaming
+- Out of Order execution
 - Hardware prefetching
 
 # Baseline
