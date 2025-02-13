@@ -1,62 +1,58 @@
 module circ_fifo $(parameter int WIDTH = 6, parameter int DEPTH = 64)(
     input clk, rst_n,
-    input logic wr_en, rd_en,
-    input logic capacity,
-    input [5:0] logic element,
-    output [5:0] logic element
+    input w_en, r_en,
+    input revert,
+    input logic rev_size,
+    input [WIDTH-1:0] logic dat_in,
+    output [WIDTH-1:0] logic dat_out
 );
 
 
-
-int size = 0;
-int head = 0;
-int tail = 0;
+reg [$clog2(DEPTH)-1 : 0] w_ptr, r_ptr;
+reg [WIDTH-1:0] fifo[DEPTH];
 
 
+//Reset values
+always@(posedge clk) begin
+    if(~rst_n) begin
+        w_ptr <=0; r_ptr <= 0;
+        dat_out <= 0;
+    end
+end
+
+//write data to fifo
+always@(posedge clk) begin
+    if(w_en) begin
+        fifo[w_ptr] <= dat_in;
+        w_ptr <= (w_ptr + 1) % DEPTH;
+    end
+end
 
 
+//read data from fifo
+
+always@(posedge clk) begin
+    if(r_en) begin
+        dat_out <= fif0[r_ptr];
+        r_ptr <= (r_ptr + 1) % DEPTH;
+    end
+end
+
+always@(posedge clk) begin
+    if(revert) begin
+        r_ptr < abs(r_ptr - rev_size) % DEPTH;
+    end
+end
 
 
+function logic abs(input logic num)
+    if(abs < 0) return -abs;
+    else begin
+        return abs;
+    end
+endfunction
 
 
-
-//Register Renaming stuff
-	parameter int NUM_ARCH_REGS = 32;
-	parameter int NUM_PHYS_REGS = 64;
-	parameter int INTR_QUEUE_SIZE = 16;
-
-	typedef struct {
-		logic size;
-		logic head;
-		logic capacity;
-		logic tail = ((head + size) % capacity);
-	} circ_fifo_t;
-
-	logic [`DATA_WIDTH - 1 : 0] rmt [NUM_ARCH_REGS];
-
-	circ_fifo_t f_list = '{32, 0, NUM_PHYS_REGS - NUM_ARCH_REGS};
-	logic [5:0] free_list [NUM_PHYS_REGS - NUM_ARCH_REGS];
-
-	circ_fifo_t a_list = '{64, 0, NUM_PHYS_REGS};
-	logic [5 : 0] active_list [NUM_PHYS_REGS];
-
-
-	//TODO: these functions dont have logic to prevent ouroboros condition
-
-	function void enqueue(input logic [5:0] element, input circ_fifo_t circ,
-		 input logic [5:0] list [NUM_PHYS_REGS - NUM_ARCH_REGS])
-		list[circ.tail] = element;
-		circ.tail = (circ.tail + 1) % circ.capacity;
-		circ.size++;
-	endfunction
-
-	function logic dequeue( input circ_fifo_t circ,
-		 input logic [5:0] list [NUM_PHYS_REGS - NUM_ARCH_REGS])
-		 logic int temp = list[circ.head];
-		 circ.head = (circ.head + 1) % circ.capacity;
-		 circ.size--;
-		return temp;
-	endfunction
 
 
 
