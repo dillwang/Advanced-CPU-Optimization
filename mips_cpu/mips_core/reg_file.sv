@@ -54,10 +54,13 @@ module reg_file (
 	circ_fifo_t f_list = '{32, 0, NUM_PHYS_REGS - NUM_ARCH_REGS};
 	logic [5:0] free_list [NUM_PHYS_REGS - NUM_ARCH_REGS];
 
+	circ_fifo_t a_list = '{64, 0, NUM_PHYS_REGS};
+	logic [5 : 0] active_list [NUM_PHYS_REGS];
+
 
 	//TODO: these functions dont have logic to prevent ouroboros condition
 
-	function enqueue(input logic [5:0] element, input circ_fifo_t circ,
+	function void enqueue(input logic [5:0] element, input circ_fifo_t circ,
 		 input logic [5:0] list [NUM_PHYS_REGS - NUM_ARCH_REGS])
 		list[circ.tail] = element;
 		circ.tail = (circ.tail + 1) % circ.capacity;
@@ -94,15 +97,19 @@ module reg_file (
 	
     //allocate new free physreg
 
+	//TODO: I need to adjust logic to make the reg fetched from free list be the one assigned for rename and then the old one gets added to 
+
     always_ff @(posedge clk or negedge rst_n) begin
         if(~rst_n) begin
-            for(int i = 0, i < NUM_ARCH_REGS i++) begin
+            for(int i = 0, i < NUM_ARCH_REGS,  i++) begin
                 free_list[i] = i;
             end
         end
         else begin
-		
-		
+			if(decoder_output_ifc.isvalid) begin
+				//TODO: phys_rd = fetch_free()
+				//TODO: put arch_rd data in phys rd
+				//TODO: enqueue(phys_rd, a_list)
 		
 		end
 	end
