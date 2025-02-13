@@ -79,7 +79,7 @@ module decoder (
 	function logic dequeue( input circ_fifo_t circ,
 		 input logic [5:0] list [NUM_PHYS_REGS - NUM_ARCH_REGS])
 		 logic int temp = list[circ.head];
-		 circ.head++;
+		 circ.head = (circ.head + 1) % circ.capacity;
 		 circ.size--;
 		return temp;
 	endfunction
@@ -104,6 +104,16 @@ module decoder (
 	endfunction
 
 	
+    //allocate new free physreg
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if(~rst_n) begin
+            for(int i = 0, i < NUM_ARCH_REGS i++) begin
+                free_list[i] = i;
+            end
+        end
+        else begin
+
 
 
 
