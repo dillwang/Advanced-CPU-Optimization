@@ -35,7 +35,7 @@ endinterface
 
 module register_renaming (
     input clk, rst_n,
-    input decoder_output_ifc.
+    input decoder_output_ifc.out,
 
 );
 
@@ -43,36 +43,18 @@ module register_renaming (
 	//Register Renaming stuff
 	parameter int NUM_ARCH_REGS = 32;
 	parameter int NUM_PHYS_REGS = 64;
-	parameter int INTR_QUEUE_SIZE = 16;
+	parameter int INSTR_QUEUE_SIZE = 16;
 
-	typedef struct {
-		logic size;
-		logic head;
-		logic capacity;
-		logic tail = ((head + size) % capacity);
-	} circ_fifo_t;
+
+	logic [5:0] fl_in;
+	logic fl_out;
+
+	
 
 	logic [5:0] rmt [NUM_ARCH_REGS];
 
-	circ_fifo_t f_list = '{32, 0, NUM_PHYS_REGS - NUM_ARCH_REGS};
-	logic [5:0] free_list [NUM_PHYS_REGS - NUM_ARCH_REGS];
-
-
-	//TODO: these functions dont have logic to prevent ouroboros condition
-
-	function enqueue(input logic [5:0] element, input circ_fifo_t circ,
-		 input logic [5:0] list [NUM_PHYS_REGS - NUM_ARCH_REGS])
-		list[circ.tail] = element;
-		circ.size++;
-	endfunction
-
-	function logic dequeue( input circ_fifo_t circ,
-		 input logic [5:0] list [NUM_PHYS_REGS - NUM_ARCH_REGS])
-		 logic int temp = list[circ.head];
-		 circ.head = (circ.head + 1) % circ.capacity;
-		 circ.size--;
-		return temp;
-	endfunction
+	circ_fifo free_list();
+	circ_fifo #(6, 32) active_list();
 
 
 
@@ -84,25 +66,10 @@ module register_renaming (
 		logic valid;
 	} Instr_Queue_Entry_t;
 
-	Instr_Queue_Entry_t instr_queue[INTR_QUEUE_SIZE];
-	instr_head = 0;
+	Instr_Queue_Entry_t instr_queue[INSTR_QUEUE_SIZE];
 
 
-	function logic [5:0] fetch_free()
-		logic [5:0] new_reg = dequeue(f_list, free_list);
-		return new_reg;
-	endfunction
 
-	
-    //allocate new free physreg
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if(~rst_n) begin
-            for(int i = 0, i < NUM_ARCH_REGS i++) begin
-                free_list[i] = i;
-            end
-        end
-        else begin
 
 
 
