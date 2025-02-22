@@ -135,7 +135,7 @@ module register_renaming (
 	always_ff @(posedge clk or negedge rst_n) begin
 		if(~rst_n) begin
 				instr_head <= 0;
-		end 
+		end
 		else if (decoder_output_ifc.valid) begin
 			//fetch new phys reg from free list
 			fl_r_en <= 1;
@@ -149,6 +149,7 @@ module register_renaming (
 			al_in <= rmt[decoder_output_ifc.rw_addr];
 
 			//put instr in instr queue
+			//TODO: NEED TO ADD LOGIC FOR CHECKING IF REGISTER IS IN USE
 			instr_queue[instr_head].instruction = decoder_output_ifc.instruction;
 			instr_queue[instr_head].rd_phys = rw_phys;
 			instr_queue[instr_head].rs_phys = rmt[decoder_output_ifc.rs_addr];
@@ -161,6 +162,30 @@ module register_renaming (
 		al_w_en <= 0;
 	end
 
+	//TODO: ADD BUSYBIT TABLE LOGIC
+
+	logic busy_table [64];
+
+	//reg is busy if bit is high
+	always_ff @(posedge clk or negedge rst_n) begin
+		if(~rst_n) begin
+			for(int i = 0; i < 64; i++) begin
+				busy_table[i] = 0;
+			end
+		end
+		else begin
+			for(int i = 0; i < 32; i++) begin
+				busy_table[f_list.fifo[i]] = 1; //DOES THIS WORK???
+				//the idea is to grab the register number from the free list and use that as the index to switch the bits to high in the busy bit table
+			end
+		end
+
+		//TODO: ADD LOGIC TO HANDLE SETTING BUSY BITS TO LOW AND TO RECOVER + COMMIT
+		//TODO: ADD LOGIC FOR INHIBITING EXECUTION OF INSTRS WHOSE OPERANDS ARE BUSY
+	end
+				
+
+
 
 /*		COMMIT AND MISPREDICT LOGIC TO FINISH LATER
 
@@ -172,11 +197,11 @@ always_ff @(posedge clk or negedge rst_n) begin
     end else if (commit_condition) begin
         // Free old physical register
         fl_w_en <= 1;
+		al_r_en <= 1;
         fl_in <= al_out; // Move old physical register back to free list
 
-        // Remove from active list
-        al_r_en <= 1;
     end
+	al_r_en <= 0;
 end
 
 HAZARD CONTROLLER?
