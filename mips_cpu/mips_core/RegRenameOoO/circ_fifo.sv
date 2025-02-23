@@ -11,7 +11,7 @@ module circ_fifo #(parameter int WIDTH = 6, parameter int DEPTH = 64)(
 reg [$clog2(DEPTH)-1 : 0] w_ptr, r_ptr;
 reg [WIDTH-1:0] fifo[DEPTH];
 
-
+/*
 //Reset values
 always@(posedge clk) begin
     if(~rst_n) begin
@@ -42,6 +42,29 @@ end
 always@(posedge clk) begin
     if(revert) begin
         r_ptr <= abs(r_ptr - rev_size) % DEPTH;
+    end
+end
+
+*/
+
+always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        w_ptr   <= 0;
+        r_ptr   <= 0;
+        dat_out <= 0;
+    end else begin
+        // Write logic
+        if (w_en) begin
+            fifo[w_ptr] <= dat_in;
+            w_ptr <= (w_ptr + 1) % DEPTH;
+        end
+        // Revert logic takes priority over read.
+        if (revert) begin
+            r_ptr <= abs(r_ptr - rev_size) % DEPTH;
+        end else if (r_en) begin
+            dat_out <= fifo[r_ptr];
+            r_ptr <= (r_ptr + 1) % DEPTH;
+        end
     end
 end
 
