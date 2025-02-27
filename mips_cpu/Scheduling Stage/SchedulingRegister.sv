@@ -2,6 +2,8 @@ module pr_sch (
 	input clk,    // Clock
 	input rst_n,  // Synchronous reset active low
 
+	input next_instr,	//make this work, takes instruction input from reg rename
+
 	hazard_control_ifc.in i_hc,
 
 	// Pipelined interfaces
