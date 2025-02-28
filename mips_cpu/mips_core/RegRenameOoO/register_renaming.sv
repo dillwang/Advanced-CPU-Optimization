@@ -129,12 +129,9 @@ module register_renaming (
         logic valid;
     } Instr_Queue_Entry_t;
 
-    logic instr_head;
-
-	//instr q: Squash: Writeback bit to 0
+	//instr q: Squash: set Writeback bit to 0
 	//clear instr queue and clear busy bit?
 
-    Instr_Queue_Entry_t instr_queue[INSTR_QUEUE_SIZE];
 
     always_ff @(posedge clk or negedge rst_n) begin
         if(~rst_n) begin
@@ -144,6 +141,7 @@ module register_renaming (
             //fetch new phys reg from free list
             fl_r_en <= 1;
             rw_phys <= fl_out;
+            busy_table[rw_phys] <= 1;   //set busy bit to high when removed from free list
 
             // Save old mapping in active list
             al_w_en <= 1;
@@ -154,25 +152,20 @@ module register_renaming (
 
             //put instr in instr queue do we do this here or pass through? I think pass through to scheduling stage
             //TODO: NEED TO ADD LOGIC FOR CHECKING IF REGISTER IS IN USE
-            // instr_queue[instr_head].instruction <= decoder_output_ifc.instruction;
-            // instr_queue[instr_head].rd_phys <= rw_phys;
-            // instr_queue[instr_head].rs_phys <= rmt[decoder_output_ifc.rs_addr];
-            // instr_queue[instr_head].rt_phys <= rmt[decoder_output_ifc.rt_addr];
-            // instr_queue[instr_head].valid <= 1;
-
-            // instr_head <= (instr_head + 1) % INSTR_QUEUE_SIZE;
 			
 			next_instr.instruction <= decoder_output_ifc.instruction;
-            next_instr.rd_phys <= rw_phys;
+            next_instr.rd_phys <= rmt[decoder_output_ifc.rw_addr];
             next_instr.rs_phys <= rmt[decoder_output_ifc.rs_addr];
             next_instr.rt_phys <= rmt[decoder_output_ifc.rt_addr];
-            next_instr.valid <= 1;
+            next_instr.valid <= 
+                !(busy_table[rmt[decoder_output_ifc.rs_addr] 
+                & busy_table[rmt[decoder_output_ifc.rt_addr]]]);
         end
         fl_r_en <= 0;
         al_w_en <= 0;
     end
 
-    //TODO: ADD BUSYBIT TABLE LOGIC
+    //BUSY BIT TABLE
 
     logic busy_table [64];
 
@@ -184,17 +177,23 @@ module register_renaming (
                 busy_table[i] = 0;
             end
         end
-        else begin
-            for(int i = 0; i < 32; i++) begin
-                busy_table[f_list.fifo[i]] = 1; //DOES THIS WORK???
-                //the idea is to grab the register number from the free list and use that as the index to switch the bits to high in the busy bit table
-            end
-        end
 
         //TODO: ADD LOGIC TO HANDLE SETTING BUSY BITS TO LOW AND TO RECOVER + COMMIT
         //TODO: ADD LOGIC FOR INHIBITING EXECUTION OF INSTRS WHOSE OPERANDS ARE BUSY
     end
                 
+
+    /* 
+        TODO: WB and Commit:
+        1. Reset busy bit table
+        2. commit instructions in order -> use active list as order for commit
+        Other:
+        1. connections for stages
+        2. ROB/Instr Queue implementation and instr ordering
+    */
+
+
+
 
 
 
