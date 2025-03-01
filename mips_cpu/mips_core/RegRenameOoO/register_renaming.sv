@@ -33,13 +33,26 @@ endinterface
 
 
 
+interface reg_ren_ifc();
+	Instr_Queue_Entry_t next_instr; //next instruction
+    logic instr_wr; //allow the instruction to be written into the instruction queue
+
+    modport out (next_instr, instr_wr);
+endinterface
+
+//This needs work ^^ I will need to rewrite how the register file parses these instructions
+//how do I pass the decoder outputs that I need(uses_rt, etc) through?
+
 module register_renaming (
 	//need input from hazard controller to revert pointers and adjust busy bit table
     input clk, rst_n,
-    decoder_output_ifc.out decode_in,
-    output Instr_Queue_Entry_t next_instr
+    decoder_output_ifc.in decode_in,
+    output Instr_Queue_Entry_t next_instr,
+    output logic instr_wr   //Handle with HC stall logic
 );
 
+
+//SEND EVERYTHING THROUGH DECODER OUT? THEN DO STRUCT STUFF IN INSTR QUEUE?
 
     //Register Renaming stuff
     parameter int NUM_ARCH_REGS = 32;
@@ -137,7 +150,7 @@ module register_renaming (
         if(~rst_n) begin
                 instr_head <= 0;
         end
-        else if (decoder_output_ifc.valid) begin
+        else if (decode_in.valid) begin
             //fetch new phys reg from free list
             fl_r_en <= 1;
             rw_phys <= fl_out;
@@ -145,24 +158,26 @@ module register_renaming (
 
             // Save old mapping in active list
             al_w_en <= 1;
-            al_in <= rmt[decoder_output_ifc.rw_addr];
+            al_in <= rmt[decode_in.rw_addr];
 
             //update rmt with new mapping
-            rmt[decoder_output_ifc.rw_addr] <= rw_phys;
+            rmt[decode_in.rw_addr] <= rw_phys;
 
             //put instr in instr queue do we do this here or pass through? I think pass through to scheduling stage
             //TODO: NEED TO ADD LOGIC FOR CHECKING IF REGISTER IS IN USE
 			
-			next_instr.instruction <= decoder_output_ifc.instruction;
-            next_instr.rd_phys <= rmt[decoder_output_ifc.rw_addr];
-            next_instr.rs_phys <= rmt[decoder_output_ifc.rs_addr];
-            next_instr.rt_phys <= rmt[decoder_output_ifc.rt_addr];
-            next_instr.valid <= 
-                !(busy_table[rmt[decoder_output_ifc.rs_addr] 
-                & busy_table[rmt[decoder_output_ifc.rt_addr]]]);
+			next_instr.instruction <= decode_alu_ctl;
+            next_instr.rd_phys <= rmt[decode_in.rw_addr];
+            next_instr.rs_phys <= rmt[decode_in.rs_addr];
+            next_instr.rt_phys <= rmt[decode_in.rt_addr];
+            next_instr.valid <=
+                !(busy_table[rmt[decode_in.rs_addr]
+                & busy_table[rmt[decode_in.rt_addr]]]);
+            instr_wr <= 1;
         end
         fl_r_en <= 0;
         al_w_en <= 0;
+        instr_wr <= 0;
     end
 
     //BUSY BIT TABLE

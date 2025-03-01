@@ -102,3 +102,5 @@ interface hazard_control_ifc ();
 	modport in  (input flush, stall);
 	modport out (output flush, stall);
 endinterface
+
+

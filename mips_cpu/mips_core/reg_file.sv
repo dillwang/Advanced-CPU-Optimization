@@ -39,7 +39,7 @@ module reg_file (
 
 
 
-	logic [`DATA_WIDTH - 1 : 0] regs [32];
+	logic [`DATA_WIDTH - 1 : 0] regs [64];
 
 	assign out.rs_data = i_decoded.uses_rs ? regs[i_decoded.rs_addr] : '0;
 	assign out.rt_data = i_decoded.uses_rt ? regs[i_decoded.rt_addr] : '0;
