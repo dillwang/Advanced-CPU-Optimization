@@ -12,6 +12,7 @@
  *   Read masters x2:
  *     id=0 i_cache read => mem_read_*[0]
  *     id=1 d_cache read => mem_read_*[1]
+	   id=2 2 stream buffer=> mem_read_
  *   Write masters x1:
  *     id=0 d_cache read => mem_write_*[0]
  *
