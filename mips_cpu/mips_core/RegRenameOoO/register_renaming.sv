@@ -1,5 +1,7 @@
 //New Stage for handling register renaming
 
+`include "mips_core.svh"
+
 interface decoder_output_ifc ();
     logic valid;
     mips_core_pkg::AluCtl alu_ctl;
@@ -135,11 +137,23 @@ module register_renaming (
 
 
     typedef struct {
-        logic [31:0] instruction;
+        logic [31:0] instruction; //alu_ctl
         logic [5:0] rd_phys;
         logic [5:0] rt_phys;
         logic [5:0] rs_phys;
         logic valid;
+        logic instr_valid;
+        logic is_branch_jump;
+        logic is_jump;
+        logic is_jump_reg;
+        logic branch_target;
+        logic is_mem_access;
+        logic mem_action;
+        logic uses_rs;
+        logic uses_rt;
+        logic uses_immediate;
+        logic [`DATA_WIDTH-1:0] immediate;
+        logic uses_rw; //uses rd
     } Instr_Queue_Entry_t;
 
 	//instr q: Squash: set Writeback bit to 0
@@ -150,7 +164,8 @@ module register_renaming (
         if(~rst_n) begin
                 instr_head <= 0;
         end
-        else if (decode_in.valid) begin
+        else if (decode_in.valid) begin //does this work the way I'm using it? It seems to only be
+        // high if theres a memory access. How do I correctly do this?
             //fetch new phys reg from free list
             fl_r_en <= 1;
             rw_phys <= fl_out;
@@ -170,9 +185,10 @@ module register_renaming (
             next_instr.rd_phys <= rmt[decode_in.rw_addr];
             next_instr.rs_phys <= rmt[decode_in.rs_addr];
             next_instr.rt_phys <= rmt[decode_in.rt_addr];
-            next_instr.valid <=
+            next_instr.instr_valid <=
                 !(busy_table[rmt[decode_in.rs_addr]
                 & busy_table[rmt[decode_in.rt_addr]]]);
+            next_instr.valid <= decode_in.valid;
             instr_wr <= 1;
         end
         fl_r_en <= 0;
