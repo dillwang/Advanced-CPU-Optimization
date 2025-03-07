@@ -51,6 +51,10 @@ module i_cache #(
     `endif
 
 
+
+
+
+
     localparam TAG_WIDTH = `ADDR_WIDTH - INDEX_WIDTH - BLOCK_OFFSET_WIDTH - 2;
     localparam LINE_SIZE = 1 << BLOCK_OFFSET_WIDTH;
     localparam DEPTH = 1 << INDEX_WIDTH;
@@ -198,7 +202,7 @@ module i_cache #(
         mem_read_data.RREADY = 1'b1;
     end
 
-    // NOT SURE ABOUT THIS!
+
     always_comb
     begin
         for (int i=0; i<ASSOCIATIVITY;i++)
