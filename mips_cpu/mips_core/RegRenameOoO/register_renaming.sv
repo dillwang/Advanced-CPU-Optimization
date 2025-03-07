@@ -1,5 +1,7 @@
 //New Stage for handling register renaming
 
+`include "mips_core.svh"
+
 interface decoder_output_ifc ();
     logic valid;
     mips_core_pkg::AluCtl alu_ctl;
@@ -36,8 +38,10 @@ endinterface
 interface reg_ren_ifc();
 	Instr_Queue_Entry_t next_instr; //next instruction
     logic instr_wr; //allow the instruction to be written into the instruction queue
+    logic busy_bits [64];
 
-    modport out (next_instr, instr_wr);
+    modport in(next_instr, instr_wr, busy_bits);
+    modport out (next_instr, instr_wr, busy_bits);
 endinterface
 
 //This needs work ^^ I will need to rewrite how the register file parses these instructions
@@ -47,8 +51,7 @@ module register_renaming (
 	//need input from hazard controller to revert pointers and adjust busy bit table
     input clk, rst_n,
     decoder_output_ifc.in decode_in,
-    output Instr_Queue_Entry_t next_instr,
-    output logic instr_wr   //Handle with HC stall logic
+    reg_ren_ifc.out out   //Handle with HC stall logic
 );
 
 
@@ -59,7 +62,7 @@ module register_renaming (
     parameter int NUM_PHYS_REGS = 64;
     parameter int INSTR_QUEUE_SIZE = 16;
 
-    logic rw_phys;
+    logic [5:0] rw_phys;
 
 
     logic [5:0] fl_in;
@@ -135,22 +138,35 @@ module register_renaming (
 
 
     typedef struct {
-        logic [31:0] instruction;
-        logic [5:0] rd_phys;
+        mips_core_pkg::AluCtl instruction; //alu_ctl
+        logic [5:0] rw_phys;
         logic [5:0] rt_phys;
         logic [5:0] rs_phys;
         logic valid;
+        logic ready;
+        logic is_branch_jump;
+        logic is_jump;
+        logic is_jump_reg;
+        logic [`ADDR_WIDTH - 1 : 0] branch_target;
+        logic is_mem_access;
+        mips_core_pkg::MemAccessType mem_action;
+        logic uses_rs;
+        logic uses_rt;
+        logic uses_immediate;
+        logic [`DATA_WIDTH - 1 : 0] immediate;
+        logic uses_rw; //uses rw
     } Instr_Queue_Entry_t;
 
 	//instr q: Squash: set Writeback bit to 0
 	//clear instr queue and clear busy bit?
-
+    
 
     always_ff @(posedge clk or negedge rst_n) begin
         if(~rst_n) begin
                 instr_head <= 0;
         end
-        else if (decode_in.valid) begin
+        else if (decode_in.valid) begin //does this work the way I'm using it? It seems to only be
+        // high if theres a memory access. How do I correctly do this?
             //fetch new phys reg from free list
             fl_r_en <= 1;
             rw_phys <= fl_out;
@@ -166,18 +182,46 @@ module register_renaming (
             //put instr in instr queue do we do this here or pass through? I think pass through to scheduling stage
             //TODO: NEED TO ADD LOGIC FOR CHECKING IF REGISTER IS IN USE
 			
-			next_instr.instruction <= decode_alu_ctl;
-            next_instr.rd_phys <= rmt[decode_in.rw_addr];
-            next_instr.rs_phys <= rmt[decode_in.rs_addr];
-            next_instr.rt_phys <= rmt[decode_in.rt_addr];
-            next_instr.valid <=
+            //alu_ctl
+			out.next_instr.instruction <= decode_in.alu_ctl;
+            //rw phys address
+            out.next_instr.rw_phys <= rmt[decode_in.rw_addr];
+            //rs phys
+            out.next_instr.rs_phys <= rmt[decode_in.rs_addr];
+            //rt phys
+            out.next_instr.rt_phys <= rmt[decode_in.rt_addr];
+            //are operands ready?
+            out.next_instr.ready <=
                 !(busy_table[rmt[decode_in.rs_addr]
                 & busy_table[rmt[decode_in.rt_addr]]]);
-            instr_wr <= 1;
+            //valid from decode
+            out.next_instr.valid <= decode_in.valid;
+            //is branch jump
+           out.next_instr.is_branch_jump <= decode_in.is_branch_jump;
+            //is jump
+            out.next_instr.is_jump <= decode_in.is_jump;
+            //is jump reg
+            out.next_instr.is_jump_reg <= decode_in.is_jump_reg;
+            //is mem access
+            out.next_instr.is_mem_access <= decode_in.is_mem_access;
+            //mem action
+            out.next_instr.mem_action <= decode_in.mem_action;
+            //branch target
+            out.next_instr.branch_target <= decode_in.branch_target;
+            //uses rs
+            out.next_instr.uses_rs <= decode_in.uses_rs;
+            //uses rt
+            out.next_instr.uses_rt <= decode_in.uses_rt;
+            //uses rw
+            out.next_instr.uses_rw <= decode_in.uses_rw;
+            //uses immediate
+            out.next_instr.uses_immediate <= decode_in.uses_immediate;
+            //instruction write set to high
+            out.instr_wr <= 1;
         end
         fl_r_en <= 0;
         al_w_en <= 0;
-        instr_wr <= 0;
+        out.instr_wr <= 0;
     end
 
     //BUSY BIT TABLE
@@ -192,7 +236,7 @@ module register_renaming (
                 busy_table[i] = 0;
             end
         end
-
+        out.next_instr.busy_bits <= busy_table;
         //TODO: ADD LOGIC TO HANDLE SETTING BUSY BITS TO LOW AND TO RECOVER + COMMIT
         //TODO: ADD LOGIC FOR INHIBITING EXECUTION OF INSTRS WHOSE OPERANDS ARE BUSY
     end
