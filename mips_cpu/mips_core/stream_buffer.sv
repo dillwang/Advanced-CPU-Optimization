@@ -29,8 +29,7 @@ module stream_buffer #(
 
 
     // These are not right
-    localparam TAG_WIDTH = `ADDR_WIDTH - INDEX_WIDTH - BLOCK_OFFSET_WIDTH - 2;
-    localparam LINE_SIZE = 1 << BLOCK_OFFSET_WIDTH;
+    localparam TAG_WIDTH = `ADDR_WIDTH - BLOCK_OFFSET_WIDTH - 2;
     localparam DEPTH = 1 << INDEX_WIDTH;
 
     // Parsing

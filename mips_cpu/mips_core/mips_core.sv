@@ -129,6 +129,8 @@ module mips_core (
 		.o_pc_next    (if_pc_next)
 	);
 
+	// Stream buffer here
+
 	i_cache I_CACHE(
 		.clk, .rst_n,
 
