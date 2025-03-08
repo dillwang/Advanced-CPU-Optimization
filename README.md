@@ -74,5 +74,7 @@ The Perceptron and the Gshare are both finished. Here is a screenshot of their a
 
 # Hardware Prefetching
 
+We implemented a next-line Hardware Prefetcher along with a Stream Buffer.
+
 
 
