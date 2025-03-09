@@ -10,16 +10,12 @@ module stream_buffer #(
     input clk,    // Clock
     input rst_n,  // Synchronous reset active low
 
-    //sb_hit
-    output sb_hit,
-
-
     // Request
     pc_ifc.in sb_pc_current,
     pc_ifc.in sb_pc_next,
 
     // Response
-    cache_output_ifc.out out, // Change this output
+    sb_ifc.out out, // Change this output
 
     // Memory interface
     axi_read_address.master mem_read_address,
@@ -83,7 +79,7 @@ module stream_buffer #(
     endgenerate
 
     // tagbank signals
-    logic tagbank_we;
+    logic [DEPTH - 1 : 0] tagbank_we;
     logic [TAG_WIDTH - 1 : 0] tagbank_wdata;
     logic [DEPTH - 1 : 0] tagbank_waddr;
     logic [DEPTH - 1 : 0] tagbank_raddr;
@@ -106,6 +102,10 @@ module stream_buffer #(
         end
     endgenerate
 
+    // Intermediate signals
+    logic hit, miss, tag_hit;
+
+    // Define tag hits
     always_comb
     begin
         tag_hit = (sb_tag == tagbank_rdata[head_ptr]);
@@ -113,41 +113,45 @@ module stream_buffer #(
         miss = ~hit;
 
         //last_refill_word = databank_select[LINE_SIZE - 1] & mem_read_data.RVALID;
-
-        if (hit)
-        begin
-            out = databank_rdata[head_ptr];
-            sb_hit = 1;
-        end
-        else if (miss)
-        begin
-            sb_hit = 0;
-        end
-        else
-        begin
-
-        end
     end
 
+    //Wiring memory logics
     always_comb
     begin
-        mem_read_address.ARADDR = {r_tag, r_index,
-            {BLOCK_OFFSET_WIDTH + 2{1'b0}}};
-        mem_read_address.ARLEN = LINE_SIZE;
+        mem_read_address.ARADDR = {r_tag + 2{1'b0}};
+        mem_read_address.ARLEN = TAG_WIDTH; // not sure
         mem_read_address.ARVALID = state == STATE_PREFETCH_REQUEST;
-        mem_read_address.ARID = 4'd0;
-
+        mem_read_address.ARID = 4'd2;
         // Always ready to consume data
         mem_read_data.RREADY = 1'b1;
     end
 
+
+    //Wiring Tag Bank signals
+    always_comb
+    begin
+        for (int i = 0; i < DEPTH; i++)
+            tagbank_we[i] = 1'b0;
+    
+        tagbank_wdata = r_tag;
+        tagbank_waddr = r_index;
+        tagbank_raddr = i_index_next;
+    end
+
+    //Wiring output data
+    always_comb
+    begin
+        out.valid = hit;
+        out.data = databank_rdata[select_way][i_block_offset];
+    end
+
+    // Finite State Machine transition
     always_comb
     begin
         next_state = state;
         unique case (state)
             STATE_READY:
-                if (miss)
-                    next_state = STATE_PREFETCH_REQUEST;
+                next_state = STATE_PREFETCH_REQUEST;
             STATE_PREFETCH_REQUEST:
                 if (mem_read_address.ARREADY)
                     next_state = STATE_FILL_DATA;
@@ -157,12 +161,14 @@ module stream_buffer #(
         endcase
     end
 
-
+    // What happens in each stage
     always_ff @(posedge clk)
     begin
         if(~rst_n)
         begin
             state <= STATE_READY;
+            head_ptr <= 0;
+            tail_ptr <= 0;
         end
         else
         begin
@@ -173,9 +179,16 @@ module stream_buffer #(
                 begin
                     if (miss)
                     begin
-                        r_tag <= i_tag;
-                        r_index <= i_index;
-                        r_select_way <= select_way;
+                        r_tag <= sb_next_tag;
+                        tail_ptr <= head_ptr;
+                    end
+                    else if (hit)
+                    begin
+                        r_tag <= r_tag + 4;
+                        head_ptr <= (head_ptr + 1) % 8;
+                    end
+                    else
+                    begin
                     end
                 end
                 STATE_PREFETCH_REQUEST:
@@ -187,11 +200,14 @@ module stream_buffer #(
                         databank_select <= {databank_select[LINE_SIZE - 2 : 0],
                             databank_select[LINE_SIZE - 1]};
 
-                    if (last_refill_word)
-                    begin
-                        valid_bits[r_select_way][r_index] <= 1'b1;
-                        valid_bits[~r_select_way][r_index] <= valid_bits[~r_select_way][r_index]; // Retain the other way's valid bit
-                    end
+                    //Update Tail pointer
+                    tail_ptr <= (tail_ptr + 1) % 8;
+
+                    // if (last_refill_word)
+                    // begin
+                    //     valid_bits[r_select_way][r_index] <= 1'b1;
+                    //     valid_bits[~r_select_way][r_index] <= valid_bits[~r_select_way][r_index]; // Retain the other way's valid bit
+                    // end
                 end
             endcase
         end

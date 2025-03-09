@@ -43,17 +43,15 @@ module i_cache #(
 
     // Memory interface
     axi_read_address.master mem_read_address,
-    axi_read_data.master mem_read_data
+    axi_read_data.master mem_read_data,
+
+    //sb_ifc
+    sb_ifc.in sb_in
 );
 
     `ifdef SIMULATION
         import "DPI-C" function void stats_event(input string e);
     `endif
-
-
-
-
-
 
     localparam TAG_WIDTH = `ADDR_WIDTH - INDEX_WIDTH - BLOCK_OFFSET_WIDTH - 2;
     localparam LINE_SIZE = 1 << BLOCK_OFFSET_WIDTH;
@@ -179,6 +177,13 @@ module i_cache #(
                 select_way = 'b1;
             end
         end
+        // Modify here for stream buffer
+        /*
+        else if (miss && sb_hit)
+        begin
+
+        end
+        */
         else if (miss)
         begin
             select_way = lru_rp[i_index];
