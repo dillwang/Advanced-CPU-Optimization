@@ -142,7 +142,7 @@ module stream_buffer #(
     always_comb
     begin
         out.valid = hit;
-        out.data = databank_rdata[select_way][i_block_offset];
+        out.data = databank_rdata[head_ptr];
     end
 
     // Finite State Machine transition
@@ -202,12 +202,6 @@ module stream_buffer #(
 
                     //Update Tail pointer
                     tail_ptr <= (tail_ptr + 1) % 8;
-
-                    // if (last_refill_word)
-                    // begin
-                    //     valid_bits[r_select_way][r_index] <= 1'b1;
-                    //     valid_bits[~r_select_way][r_index] <= valid_bits[~r_select_way][r_index]; // Retain the other way's valid bit
-                    // end
                 end
             endcase
         end
