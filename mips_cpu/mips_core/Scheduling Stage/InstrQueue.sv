@@ -2,8 +2,8 @@
 
 module InstrQueue (
     input clk, rst_n,
-    reg_ren_ifc.out rr_ifc,
-    hazard_control_ifc.in i_hc,
+    reg_ren_ifc.in rr_ifc,
+    hazard_control_ifc.in i_hc, //necessary??
 
 	// Pipelined interfaces
 	pc_ifc.in  i_pc,
@@ -17,10 +17,11 @@ module InstrQueue (
     //Also need register read stage stuff
     //need to pass decoder information through
 
-    output Instr_Queue_Entry_t next_instr,
-    output logic[32] instr_count
+    output Instr_Queue_Entry_t next_instr
 
 );
+
+//TODO: make pipeline register to handle stalls
 
 interface IQ_ifc ();
     logic [5:0] rw_phys;
@@ -62,15 +63,32 @@ logic instr_head;
 
 logic[32] count;
 
-//figure out how to handle stalls
+//TODO: make sure this always comb works
+
+always_comb begin
+    for(int i = 0; i < INSTR_QUEUE_SIZE; i++) begin //logic to check if registers are ready
+    //busy bit table should not be clocked(instructions dependent on this register can issue now)
+    //mips r10k branch stack for recovery
+        instr_queue[i].ready = (rr_ifc.busy_bits[instr_queue[i].rt_phys])
+        & rr_ifc.busy_bits[instr_queue[i].rs_phys];
+    end
+end
 
 always_ff@(posedge clk or ~rst_n) begin
+    send_instr <= 1;
     if(~rst_n) begin
         rr_ifc.instr_wr <= 0;
         instr_head <= 0;
-        count <= 0;
         for(int i = 0; i < INSTR_QUEUE_SIZE; i++) begin
             valid_entry[i] = 1; //valid entry position to put an instr in
+        end
+    end
+    else if(i_hc.flush) begin   // how do I find the number of the branch instr?
+        send_instr <= 0;
+        for(int i = 0; i < INSTR_QUEUE_SIZE; i++) begin
+            if(instr_queue[i].count > br_inst_count) begin
+                instr_queue[i].valid_entry = 1;
+            end
         end
     end
     else begin
@@ -84,8 +102,11 @@ always_ff@(posedge clk or ~rst_n) begin
             end
         end
         if(send_instr) begin
-            while((instr_queue[instr_head].valid != 1) | instr_queue[instr_head].ready != 1) begin
+            while((instr_queue[instr_head].valid != 1)
+                    | (instr_queue[instr_head].ready != 1)) begin
                 //if the instruction isnt valid or ready, skip instr
+                //Theres no chance that the entire queue will be
+                //filled with dependent instructions, right?
                 instr_head <= (instr_head + 1)%INSTR_QUEUE_SIZE;
             end
             next_instr <= instr_queue[instr_head];

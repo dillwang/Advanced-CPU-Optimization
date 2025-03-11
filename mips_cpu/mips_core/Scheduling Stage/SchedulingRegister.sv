@@ -1,8 +1,11 @@
-module pr_sch (
+module pr_rr2sch (
 	input clk,    // Clock
 	input rst_n,  // Synchronous reset active low
 
-	input next_instr,	//make this work, takes instruction input from reg rename
+
+	//reg rename ifc
+	reg_ren_ifc.in i_reg,
+	reg_ren_ifc.out o_reg,
 
 	hazard_control_ifc.in i_hc,
 

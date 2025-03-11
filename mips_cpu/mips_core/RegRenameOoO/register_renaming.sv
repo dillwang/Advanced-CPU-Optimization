@@ -2,6 +2,7 @@
 
 `include "mips_core.svh"
 
+/*
 interface decoder_output_ifc ();
     logic valid;
     mips_core_pkg::AluCtl alu_ctl;
@@ -32,7 +33,7 @@ interface decoder_output_ifc ();
         branch_target, is_mem_access, mem_action, uses_rs, rs_addr, uses_rt,
         rt_addr, uses_immediate, immediate, uses_rw, rw_addr);
 endinterface
-
+*/
 
 
 interface reg_ren_ifc();
@@ -51,9 +52,11 @@ module register_renaming (
 	//need input from hazard controller to revert pointers and adjust busy bit table
     input clk, rst_n,
     decoder_output_ifc.in decode_in,
+    hazard_control_ifc.in i_hc,
     reg_ren_ifc.out out   //Handle with HC stall logic
 );
 
+//TODO: alu passthrough stuff should probably not be with the instructions, figure that out
 
 //SEND EVERYTHING THROUGH DECODER OUT? THEN DO STRUCT STUFF IN INSTR QUEUE?
 
@@ -63,7 +66,6 @@ module register_renaming (
     parameter int INSTR_QUEUE_SIZE = 16;
 
     logic [5:0] rw_phys;
-
 
     logic [5:0] fl_in;
     logic [5:0] fl_out;
@@ -90,7 +92,7 @@ module register_renaming (
         if (~rst_n) begin //reset logic
             for (int i = 0; i < NUM_ARCH_REGS; i++) begin
                 rmt[i] = i;
-                rmt_backup[i] = i;
+                rmt_backup[i] = i; //TODO: do something with this
             end
         end
     end
@@ -137,8 +139,6 @@ module register_renaming (
             end
         end
 
-
-
     typedef struct {
         mips_core_pkg::AluCtl instruction; //alu_ctl
         logic [5:0] rw_phys;
@@ -169,8 +169,8 @@ module register_renaming (
                 instr_head <= 0;
                 instr_ctr <= 0;
         end
-        else if (decode_in.valid) begin //does this work the way I'm using it? It seems to only be
-        // high if theres a memory access. How do I correctly do this?
+        else if (decode_in.valid) begin //TODO does this work the way I'm using it? It seems
+        // to only be high if theres a memory access. How do I correctly do this?
             //fetch new phys reg from free list
             fl_r_en <= 1;
             rw_phys <= fl_out;
@@ -228,7 +228,7 @@ module register_renaming (
         fl_r_en <= 0;
         al_w_en <= 0;
         out.instr_wr <= 0;
-        count <= count + 1;
+        instr_ctr <= instr_ctr + 1;
     end
 
     //BUSY BIT TABLE
@@ -247,7 +247,26 @@ module register_renaming (
         //TODO: ADD LOGIC TO HANDLE SETTING BUSY BITS TO LOW AND TO RECOVER + COMMIT
         //TODO: ADD LOGIC FOR INHIBITING EXECUTION OF INSTRS WHOSE OPERANDS ARE BUSY
     end
-                
+
+    //Mispredict/flush handling
+    always_ff @(posedge clk) begin
+        if (i_hc.flush) begin
+            // Restore RMT from backup
+            for (int i = 0; i < NUM_ARCH_REGS; i++) begin
+                rmt[i] <= rmt_backup[i];
+            end
+
+            // Reset active list (rollback speculative writes)
+            al_rev <= 1;
+            al_rev_size <= al_head - mispredict_point;
+            fl_rev <= 1;
+            fl_rev_size <= fl_head - mispredict_point;
+            instr_ctr <= instr_ctr - (fl_head - mispredict_point);
+        end
+        al_rev <= 0;
+        fl_rev <= 0;
+    end
+
 
     /* 
         TODO: WB and Commit:
@@ -282,18 +301,7 @@ end
 
 HAZARD CONTROLLER?
 
-always_ff @(posedge clk) begin
-    if (branch_mispredict) begin
-        // Restore RMT from backup
-        for (int i = 0; i < NUM_ARCH_REGS; i++) begin
-            rmt[i] <= rmt_backup[i];
-        end
 
-        // Reset active list (rollback speculative writes)
-        al_rev <= 1;
-        al_rev_size <= al_head - mispredict_point;
-    end
-end
 
 */
 
