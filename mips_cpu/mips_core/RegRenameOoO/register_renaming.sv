@@ -79,6 +79,8 @@ module register_renaming (
     logic al_rev;
     logic al_rev_size;
 
+    logic[32] instr_ctr;
+
     
 
     logic [5:0] rmt [NUM_ARCH_REGS];
@@ -155,6 +157,7 @@ module register_renaming (
         logic uses_immediate;
         logic [`DATA_WIDTH - 1 : 0] immediate;
         logic uses_rw; //uses rw
+        logic[32] count;
     } Instr_Queue_Entry_t;
 
 	//instr q: Squash: set Writeback bit to 0
@@ -164,6 +167,7 @@ module register_renaming (
     always_ff @(posedge clk or negedge rst_n) begin
         if(~rst_n) begin
                 instr_head <= 0;
+                instr_ctr <= 0;
         end
         else if (decode_in.valid) begin //does this work the way I'm using it? It seems to only be
         // high if theres a memory access. How do I correctly do this?
@@ -179,8 +183,8 @@ module register_renaming (
             //update rmt with new mapping
             rmt[decode_in.rw_addr] <= rw_phys;
 
-            //put instr in instr queue do we do this here or pass through? I think pass through to scheduling stage
-            //TODO: NEED TO ADD LOGIC FOR CHECKING IF REGISTER IS IN USE
+            //TODO: NEED TO ADD LOGIC FOR CHECKING IF REGISTER IS IN USE:
+            //I do this in scheeduling stage/instr queue
 			
             //alu_ctl
 			out.next_instr.instruction <= decode_in.alu_ctl;
@@ -217,11 +221,14 @@ module register_renaming (
             //uses immediate
             out.next_instr.uses_immediate <= decode_in.uses_immediate;
             //instruction write set to high
-            out.instr_wr <= 1;
+            out.instr_wr <= 1;  //TODO: how do I make this make sense
+            //instr tagged with counter
+            out.count <= instr_ctr;
         end
         fl_r_en <= 0;
         al_w_en <= 0;
         out.instr_wr <= 0;
+        count <= count + 1;
     end
 
     //BUSY BIT TABLE
