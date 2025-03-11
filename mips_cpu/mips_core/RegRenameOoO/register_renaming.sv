@@ -169,9 +169,12 @@ module register_renaming (
                 instr_head <= 0;
                 instr_ctr <= 0;
         end
-        else if (decode_in.valid) begin //TODO does this work the way I'm using it? It seems
+        else if (decode_in.valid) begin
+            //TODO does this work the way I'm using it? It seems
         // to only be high if theres a memory access. How do I correctly do this?
             //fetch new phys reg from free list
+
+            //TODO: how do I separate the non-alu instructions to not do all this
             fl_r_en <= 1;
             rw_phys <= fl_out;
             busy_table[rw_phys] <= 1;   //set busy bit to high when removed from free list
@@ -201,7 +204,7 @@ module register_renaming (
             //valid from decode
             out.next_instr.valid <= decode_in.valid;
             //is branch jump
-           out.next_instr.is_branch_jump <= decode_in.is_branch_jump;
+            out.next_instr.is_branch_jump <= decode_in.is_branch_jump;
             //is jump
             out.next_instr.is_jump <= decode_in.is_jump;
             //is jump reg
@@ -237,15 +240,23 @@ module register_renaming (
 
     //reg is busy if bit is high
 	//make bit high when moving to active list(?)
-    always_ff @(posedge clk or negedge rst_n) begin
-        if(~rst_n) begin
-            for(int i = 0; i < 64; i++) begin
-                busy_table[i] = 0;
-            end
+    always_comb begin
+        /*
+        // if needed to keep busy bits same
+        for (int i = 0; i < 64; i++) begin
+            busy_table[i] = busy_table[i];
         end
-        out.next_instr.busy_bits <= busy_table;
-        //TODO: ADD LOGIC TO HANDLE SETTING BUSY BITS TO LOW AND TO RECOVER + COMMIT
-        //TODO: ADD LOGIC FOR INHIBITING EXECUTION OF INSTRS WHOSE OPERANDS ARE BUSY
+        */
+
+        // Set busy bit when a register is renamed
+        if (rename_valid && rename_uses_rw) begin
+            busy_table[rename_phys_reg] = 1; // Set busy bit for the new physical register
+        end
+
+        // Clear busy bit when a register is written back
+        if (writeback_valid) begin
+            busy_table[writeback_phys_reg] = 0; // Clear busy bit for the written-back register
+        end
     end
 
     //Mispredict/flush handling
