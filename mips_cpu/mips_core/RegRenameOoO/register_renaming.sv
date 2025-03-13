@@ -169,10 +169,13 @@ module register_renaming (
                 instr_head <= 0;
                 instr_ctr <= 0;
         end
-        else if (decode_in.valid) begin
+        else begin
+            if (decode_in.valid & decode_in.uses_rw) begin
             //TODO does this work the way I'm using it? It seems
-        // to only be high if theres a memory access. How do I correctly do this?
+             // to only be high if theres a memory access. How do I correctly do this?
             //fetch new phys reg from free list
+
+            //TODO: Separate reg renaming from rest of putting stuff into struct
 
             //TODO: how do I separate the non-alu instructions to not do all this
             fl_r_en <= 1;
@@ -183,14 +186,24 @@ module register_renaming (
             al_w_en <= 1;
             al_in <= rmt[decode_in.rw_addr];
 
+
+            //TODO: for writeback: use iw pointer
+            //when decoding, the decode might have r2 + r3 => r1, but the writeback pointer will
+            //want r4, so you cant use the decode pointer
+
+
+
             //update rmt with new mapping
             rmt[decode_in.rw_addr] <= rw_phys;
 
             //TODO: NEED TO ADD LOGIC FOR CHECKING IF REGISTER IS IN USE:
             //I do this in scheeduling stage/instr queue
-			
+
+            end
             //alu_ctl
-			out.next_instr.instruction <= decode_in.alu_ctl;
+            out.next_instr.instruction <= decode_in.alu_ctl;
+            //TODO: do I need to move this into the if statement?
+            //I need to review this
             //rw phys address
             out.next_instr.rw_phys <= rmt[decode_in.rw_addr];
             //rs phys
@@ -240,7 +253,7 @@ module register_renaming (
 
     //reg is busy if bit is high
 	//make bit high when moving to active list(?)
-    always_comb begin
+    always_ff @(posedge clk) begin
         /*
         // if needed to keep busy bits same
         for (int i = 0; i < 64; i++) begin
@@ -250,12 +263,12 @@ module register_renaming (
 
         // Set busy bit when a register is renamed
         if (rename_valid && rename_uses_rw) begin
-            busy_table[rename_phys_reg] = 1; // Set busy bit for the new physical register
+            busy_table[rename_phys_reg] <= 1; // Set busy bit for the new physical register
         end
 
         // Clear busy bit when a register is written back
         if (writeback_valid) begin
-            busy_table[writeback_phys_reg] = 0; // Clear busy bit for the written-back register
+            busy_table[writeback_phys_reg] <= 0; // Clear busy bit for the written-back register
         end
     end
 
