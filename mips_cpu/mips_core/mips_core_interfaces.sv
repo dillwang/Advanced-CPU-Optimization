@@ -104,3 +104,10 @@ interface hazard_control_ifc ();
 endinterface
 
 
+interface sb_ifc ();
+	logic sb_hit;
+	logic valid;	// Output Valid
+	logic [`DATA_WIDTH - 1 : 0] data;
+	modport in  (input sb_hit, valid, data);
+	modport out (output sb_hit, valid, data);
+endinterface
