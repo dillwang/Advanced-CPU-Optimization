@@ -1,10 +1,12 @@
 /*
  * stream_buffer.sv
+ * Auther: Diyou Wang
+ * This is a next-line Hardware Prefetching Stream Buffer.
  */
 `include "mips_core.svh"
 
 module stream_buffer #(
-    parameter DEPTH = 8 //
+    parameter DEPTH = 8 // Depth of the Stream Buffer
     )(
     // General signals
     input clk,    // Clock
@@ -37,8 +39,8 @@ module stream_buffer #(
     logic [$clog2(DEPTH)-1] tail_ptr;
     logic full, empty;
 
-    assign empty = (head == tail);
-    assign full  = ((tail + 1) % 8 == head);
+    assign empty = (head_ptr == tail_ptr);
+    assign full  = ((tail_ptr + 1) % DEPTH == head_ptr);
     
 
     assign sb_tag = sb_pc_current.pc[`ADDR_WIDTH - 1 : 2];
@@ -111,8 +113,6 @@ module stream_buffer #(
         tag_hit = (sb_tag == tagbank_rdata[head_ptr]);
         hit = tag_hit & (state == STATE_READY);
         miss = ~hit;
-
-        //last_refill_word = databank_select[LINE_SIZE - 1] & mem_read_data.RVALID;
     end
 
     //Wiring memory logics
@@ -127,15 +127,32 @@ module stream_buffer #(
     end
 
 
-    //Wiring Tag Bank signals
+    //Wiring Data Bank Signals
+    always_comb
+    begin
+        for (int i=0; i<DEPTH;i++)
+            databank_we[i] = '0;
+        if (state == STATE_REFILL_DATA && mem_read_data.RVALID)
+            databank_we[tail_ptr] = 1; // Only during refill
+
+        databank_wdata = mem_read_data.RDATA;
+        databank_waddr = tail_ptr;
+        if (next_state == STATE_READY)
+                databank_raddr = head_ptr;
+            else
+                databank_raddr = head_ptr;
+    end
+
+
+    //Wiring Tag Bank Signals
     always_comb
     begin
         for (int i = 0; i < DEPTH; i++)
             tagbank_we[i] = 1'b0;
     
         tagbank_wdata = r_tag;
-        tagbank_waddr = r_index;
-        tagbank_raddr = i_index_next;
+        tagbank_waddr = tail_ptr;
+        tagbank_raddr = head_ptr;
     end
 
     //Wiring output data
@@ -185,7 +202,7 @@ module stream_buffer #(
                     else if (hit)
                     begin
                         r_tag <= r_tag + 4;
-                        head_ptr <= (head_ptr + 1) % 8;
+                        head_ptr <= (head_ptr + 1) % DEPTH;
                     end
                     else
                     begin
@@ -201,7 +218,7 @@ module stream_buffer #(
                             databank_select[LINE_SIZE - 1]};
 
                     //Update Tail pointer
-                    tail_ptr <= (tail_ptr + 1) % 8;
+                    tail_ptr <= (tail_ptr + 1) % DEPTH;
                 end
             endcase
         end
