@@ -178,12 +178,10 @@ module i_cache #(
             end
         end
         // Modify here for stream buffer
-        /*
-        else if (miss && sb_hit)
+        else if (sb_hit)
         begin
-
+            select_way = 1'b0;
         end
-        */
         else if (miss)
         begin
             select_way = lru_rp[i_index];
@@ -212,10 +210,19 @@ module i_cache #(
     begin
         for (int i=0; i<ASSOCIATIVITY;i++)
             databank_we[i] = '0;
-        if (state == STATE_REFILL_DATA && mem_read_data.RVALID)
+        if (state == STATE_REFILL_DATA && mem_read_data.RVALID) begin
             databank_we[r_select_way] = databank_select; // Only during refill
 
-        databank_wdata = mem_read_data.RDATA;
+            databank_wdata = mem_read_data.RDATA;
+        end
+        else if (state == STATE_STREAM_REFILL && sb_in.valid) begin
+            databank_we[r_select_way] = {LINE_SIZE{1'b1}};
+            databank_wdata = sb_in.data;
+        end
+        else begin
+            databank_wdata = mem_read_data.RDATA;
+        end
+
         databank_waddr = r_index;
         if (next_state == STATE_READY)
                 databank_raddr = i_index_next;
@@ -238,8 +245,11 @@ module i_cache #(
 
     always_comb
     begin
-        out.valid = hit;
-        out.data = databank_rdata[select_way][i_block_offset];
+        out.valid = (hit || sb_hit);
+        if (sb_hit)
+            out.data = sb_in.data;
+        else
+            out.data = databank_rdata[select_way][i_block_offset];
     end
 
     always_comb
@@ -247,14 +257,18 @@ module i_cache #(
         next_state = state;
         unique case (state)
             STATE_READY:
-                if (miss)
+                if (miss && !sb_in.valid)
                     next_state = STATE_REFILL_REQUEST;
+                else if (miss && sb_in.valid)
+                    next_state = STATE_STREAM_REFILL;
             STATE_REFILL_REQUEST:
                 if (mem_read_address.ARREADY)
                     next_state = STATE_REFILL_DATA;
             STATE_REFILL_DATA:
                 if (last_refill_word)
                     next_state = STATE_READY;
+            STATE_STREAM_REFILL:
+                next_state = STATE_READY;
         endcase
     end
 
@@ -297,6 +311,14 @@ module i_cache #(
                         valid_bits[r_select_way][r_index] <= 1'b1;
                         valid_bits[~r_select_way][r_index] <= valid_bits[~r_select_way][r_index]; // Retain the other way's valid bit
                     end
+                end
+                STATE_STREAM_REFILL: begin
+                    // Here we use stream buffer data to update the cache banks.
+                    // In this example, we assume the stream buffer delivers a full line.
+                    // The write-enable for all words is already asserted in combinational logic.
+                    // You may need additional logic if your cache_bank instances require separate data handling.
+                    valid_bits[r_select_way][r_index] <= 1'b1;
+                    valid_bits[~r_select_way][r_index] <= valid_bits[~r_select_way][r_index]; // Retain the other way's valid bit
                 end
             endcase
         end

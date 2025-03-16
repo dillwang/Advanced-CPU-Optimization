@@ -17,7 +17,7 @@ module stream_buffer #(
     pc_ifc.in sb_pc_next,
 
     // Response
-    sb_ifc.out out, // Change this output
+    sb_ifc.out out,
 
     // Memory interface
     axi_read_address.master mem_read_address,
@@ -45,6 +45,9 @@ module stream_buffer #(
 
     assign sb_tag = sb_pc_current.pc[`ADDR_WIDTH - 1 : 2];
     assign sb_next_tag = sb_pc_next.pc[`ADDR_WIDTH - 1 : 2];
+
+    // Tag definition
+    logic [TAG_WIDTH - 1 : 0] r_tag; // tag of for refilling
 
 
     // States
@@ -115,11 +118,15 @@ module stream_buffer #(
         miss = ~hit;
     end
 
+    logic [4-1:0] databank_select;
+    logic last_refill_word;
+    assign last_refill_word = databank_select[BURST_LENGTH-1] & mem_read_data.RVALID;
+
     //Wiring memory logics
     always_comb
     begin
         mem_read_address.ARADDR = {r_tag + 2{1'b0}};
-        mem_read_address.ARLEN = TAG_WIDTH; // not sure
+        mem_read_address.ARLEN = 4; // not sure
         mem_read_address.ARVALID = state == STATE_PREFETCH_REQUEST;
         mem_read_address.ARID = 4'd2;
         // Always ready to consume data
@@ -138,7 +145,7 @@ module stream_buffer #(
         databank_wdata = mem_read_data.RDATA;
         databank_waddr = tail_ptr;
         if (next_state == STATE_READY)
-                databank_raddr = head_ptr;
+                databank_raddr = (head_ptr+1)%DEPTH;
             else
                 databank_raddr = head_ptr;
     end
@@ -173,7 +180,7 @@ module stream_buffer #(
                 if (mem_read_address.ARREADY)
                     next_state = STATE_FILL_DATA;
             STATE_FILL_DATA:
-                if (last_refill_word)
+                if (!full && last_refill_word)
                     next_state = STATE_READY;
         endcase
     end
@@ -186,6 +193,7 @@ module stream_buffer #(
             state <= STATE_READY;
             head_ptr <= 0;
             tail_ptr <= 0;
+            databank_select <= 1;
         end
         else
         begin
@@ -196,8 +204,8 @@ module stream_buffer #(
                 begin
                     if (miss)
                     begin
-                        r_tag <= sb_next_tag;
                         tail_ptr <= head_ptr;
+                        r_tag <= sb_next_tag;
                     end
                     else if (hit)
                     begin
@@ -213,10 +221,11 @@ module stream_buffer #(
                 end
                 STATE_FILL_DATA:
                 begin
-                    if (mem_read_data.RVALID)
-                        databank_select <= {databank_select[LINE_SIZE - 2 : 0],
-                            databank_select[LINE_SIZE - 1]};
-
+                    if (mem_read_data.RVALID) begin
+                        // Shift the one-hot databank_select to indicate progress in the burst.
+                        databank_select <= {databank_select[4-2:0],
+                                            databank_select[4-1]};
+                    end
                     //Update Tail pointer
                     tail_ptr <= (tail_ptr + 1) % DEPTH;
                 end
