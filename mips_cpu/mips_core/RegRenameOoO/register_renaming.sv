@@ -1,5 +1,8 @@
 //New Stage for handling register renaming
 
+//TODO: Separate into: Reg rename, Mispredict Recovery, Writeback, Commit, Branch Stack
+//for legibility
+
 `include "mips_core.svh"
 
 /*
@@ -33,6 +36,34 @@ interface decoder_output_ifc ();
         branch_target, is_mem_access, mem_action, uses_rs, rs_addr, uses_rt,
         rt_addr, uses_immediate, immediate, uses_rw, rw_addr);
 endinterface
+
+interface alu_pass_through_ifc ();
+	logic is_branch;
+	mips_core_pkg::BranchOutcome prediction;
+	logic [`ADDR_WIDTH - 1 : 0] recovery_target;
+
+	logic is_mem_access;
+	mips_core_pkg::MemAccessType mem_action;
+	logic [`DATA_WIDTH - 1 : 0] sw_data;
+
+	logic uses_rw;
+	mips_core_pkg::MipsReg rw_addr;
+
+	modport in  (input is_branch, prediction, recovery_target, is_mem_access,
+		mem_action, sw_data, uses_rw, rw_addr);
+	modport out (output is_branch, prediction, recovery_target, is_mem_access,
+		mem_action, sw_data, uses_rw, rw_addr);
+endinterface
+
+interface alu_input_ifc ();
+	logic valid;
+	mips_core_pkg::AluCtl alu_ctl;
+	logic signed [`DATA_WIDTH - 1 : 0] op1;
+	logic signed [`DATA_WIDTH - 1 : 0] op2;
+
+	modport in  (input valid, alu_ctl, op1, op2);
+	modport out (output valid, alu_ctl, op1, op2);
+endinterface
 */
 
 
@@ -53,12 +84,17 @@ module register_renaming (
     input clk, rst_n,
     decoder_output_ifc.in decode_in,
     hazard_control_ifc.in i_hc,
-    reg_ren_ifc.out out   //Handle with HC stall logic
+    reg_ren_ifc.out out,   //Handle with HC stall logic
+
+
+    //TODO: put these in IQ and send through
+    alu_input_ifc.in  i_alu_input,
+	alu_input_ifc.out o_alu_input,
+	alu_pass_through_ifc.in  i_alu_pass_through,
+	alu_pass_through_ifc.out o_alu_pass_through
 );
 
-//TODO: alu passthrough stuff should probably not be with the instructions, figure that out
-
-//SEND EVERYTHING THROUGH DECODER OUT? THEN DO STRUCT STUFF IN INSTR QUEUE?
+//TODO: Branch stack for recovery
 
     //Register Renaming stuff
     parameter int NUM_ARCH_REGS = 32;
@@ -83,8 +119,6 @@ module register_renaming (
 
     logic[32] instr_ctr;
 
-    
-
     logic [5:0] rmt [NUM_ARCH_REGS];
     logic [5:0] rmt_backup [NUM_ARCH_REGS];
 
@@ -92,7 +126,7 @@ module register_renaming (
         if (~rst_n) begin //reset logic
             for (int i = 0; i < NUM_ARCH_REGS; i++) begin
                 rmt[i] = i;
-                rmt_backup[i] = i; //TODO: do something with this
+                rmt_backup[i] = i; //TODO: RECOVERY LOGIC
             end
         end
     end
@@ -144,7 +178,7 @@ module register_renaming (
         logic [5:0] rw_phys;
         logic [5:0] rt_phys;
         logic [5:0] rs_phys;
-        logic valid;
+        logic valid; //same as alu?
         logic ready;
         logic is_branch_jump;
         logic is_jump;
@@ -156,13 +190,12 @@ module register_renaming (
         logic uses_rt;
         logic uses_immediate;
         logic [`DATA_WIDTH - 1 : 0] immediate;
-        logic uses_rw; //uses rw
+        logic uses_rw;
         logic[32] count;
     } Instr_Queue_Entry_t;
 
-	//instr q: Squash: set Writeback bit to 0
-	//clear instr queue and clear busy bit?
-    
+    //instr q: Squash: set Writeback bit to 0
+    //clear instr queue and clear busy bit?
 
     always_ff @(posedge clk or negedge rst_n) begin
         if(~rst_n) begin
@@ -186,57 +219,39 @@ module register_renaming (
             al_w_en <= 1;
             al_in <= rmt[decode_in.rw_addr];
 
-
             //TODO: for writeback: use iw pointer
             //when decoding, the decode might have r2 + r3 => r1, but the writeback pointer will
             //want r4, so you cant use the decode pointer
-
-
 
             //update rmt with new mapping
             rmt[decode_in.rw_addr] <= rw_phys;
 
             //TODO: NEED TO ADD LOGIC FOR CHECKING IF REGISTER IS IN USE:
             //I do this in scheeduling stage/instr queue
+            //How to do this async? but set sync?
 
             end
-            //alu_ctl
             out.next_instr.instruction <= decode_in.alu_ctl;
             //TODO: do I need to move this into the if statement?
             //I need to review this
-            //rw phys address
             out.next_instr.rw_phys <= rmt[decode_in.rw_addr];
-            //rs phys
             out.next_instr.rs_phys <= rmt[decode_in.rs_addr];
-            //rt phys
             out.next_instr.rt_phys <= rmt[decode_in.rt_addr];
             //are operands ready?
             out.next_instr.ready <=
                 !(busy_table[rmt[decode_in.rs_addr]
                 & busy_table[rmt[decode_in.rt_addr]]]);
-            //valid from decode
             out.next_instr.valid <= decode_in.valid;
-            //is branch jump
             out.next_instr.is_branch_jump <= decode_in.is_branch_jump;
-            //is jump
             out.next_instr.is_jump <= decode_in.is_jump;
-            //is jump reg
             out.next_instr.is_jump_reg <= decode_in.is_jump_reg;
-            //is mem access
             out.next_instr.is_mem_access <= decode_in.is_mem_access;
-            //mem action
             out.next_instr.mem_action <= decode_in.mem_action;
-            //branch target
             out.next_instr.branch_target <= decode_in.branch_target;
-            //uses rs
             out.next_instr.uses_rs <= decode_in.uses_rs;
-            //uses rt
             out.next_instr.uses_rt <= decode_in.uses_rt;
-            //uses rw
             out.next_instr.uses_rw <= decode_in.uses_rw;
-            //uses immediate
             out.next_instr.uses_immediate <= decode_in.uses_immediate;
-            //instruction write set to high
             out.instr_wr <= 1;  //TODO: how do I make this make sense
             //instr tagged with counter
             out.count <= instr_ctr;
@@ -252,7 +267,8 @@ module register_renaming (
     logic busy_table [64];
 
     //reg is busy if bit is high
-	//make bit high when moving to active list(?)
+    //make bit high when moving to active list(?)
+    //TODO: needs to be checked asynchronously but set synchronously
     always_ff @(posedge clk) begin
         /*
         // if needed to keep busy bits same
@@ -292,7 +308,7 @@ module register_renaming (
     end
 
 
-    /* 
+    /*
         TODO: WB and Commit:
         1. Reset busy bit table
         2. commit instructions in order -> use active list as order for commit
