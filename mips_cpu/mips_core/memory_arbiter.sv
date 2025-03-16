@@ -38,7 +38,7 @@
 
 module memory_arbiter #(
 		parameter WRITE_MASTERS = 1,
-		parameter READ_MASTERS = 2
+		parameter READ_MASTERS = 3
 	)(
 	// General signals
 	input clk,    // Clock

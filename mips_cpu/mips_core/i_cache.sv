@@ -81,7 +81,8 @@ module i_cache #(
     enum logic[1:0] {
         STATE_READY,            // Ready for incoming requests
         STATE_REFILL_REQUEST,   // Sending out a memory read request
-        STATE_REFILL_DATA       // Missing on a read
+        STATE_REFILL_DATA,       // Missing on a read
+        STATE_STREAM_REFILL      // Refill from SB
     } state, next_state;
 
     // Registers for refilling

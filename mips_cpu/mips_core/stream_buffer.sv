@@ -35,8 +35,8 @@ module stream_buffer #(
     logic [TAG_WIDTH - 1 : 0] sb_next_tag;
 
     // Head and Tail for FIFO
-    logic [$clog2(DEPTH)-1] head_ptr;
-    logic [$clog2(DEPTH)-1] tail_ptr;
+    logic [$clog2(DEPTH)-1 : 0] head_ptr;
+    logic [$clog2(DEPTH)-1 : 0] tail_ptr;
     logic full, empty;
 
     assign empty = (head_ptr == tail_ptr);
@@ -54,58 +54,48 @@ module stream_buffer #(
     enum logic[1:0] {
         STATE_READY,            // Ready for incoming requests
         STATE_PREFETCH_REQUEST,   // Sending out a memory read request
-        STATE_FILL_DATA       // Missing on a read
+        STATE_FILL_DATA,       // Missing on a read
+        STATE_WAIT
     } state, next_state;
 
 
     //databank signals
-    logic [DEPTH - 1 : 0] databank_we;
+    logic databank_we;
     logic [`DATA_WIDTH - 1 : 0] databank_wdata;
-    logic [DEPTH - 1 : 0] databank_waddr;
-    logic [DEPTH - 1 : 0] databank_raddr;
+    logic [$clog2(DEPTH)-1 : 0] databank_waddr;
+    logic [$clog2(DEPTH)-1 : 0] databank_raddr;
     logic [`DATA_WIDTH - 1 : 0] databank_rdata;
-
-    genvar g,w;
-    generate
-        for (g=0, g < DEPTH; g++)
-        begin : databanks
-            cache_bank #(
-                .DATA_WIDTH (`DATA_WIDTH),
-                .ADDR_WIDTH (DEPTH)
-            ) databank (
-                .clk,
-                .i_we (databank_we[g]),
-                .i_wdata(databank_wdata),
-                .i_waddr(databank_waddr),
-                .i_raddr(databank_raddr),
-                .o_rdata(databank_rdata)
-            );
-        end
-    endgenerate
+    
+    cache_bank #(
+        .DATA_WIDTH (`DATA_WIDTH),
+        .ADDR_WIDTH ($clog2(DEPTH))
+    ) databank (
+        .clk,
+        .i_we (databank_we),
+        .i_wdata(databank_wdata),
+        .i_waddr(databank_waddr),
+        .i_raddr(databank_raddr),
+        .o_rdata(databank_rdata)
+    );
 
     // tagbank signals
-    logic [DEPTH - 1 : 0] tagbank_we;
+    logic tagbank_we;
     logic [TAG_WIDTH - 1 : 0] tagbank_wdata;
-    logic [DEPTH - 1 : 0] tagbank_waddr;
-    logic [DEPTH - 1 : 0] tagbank_raddr;
+    logic [$clog2(DEPTH)-1 : 0] tagbank_waddr;
+    logic [$clog2(DEPTH)-1 : 0] tagbank_raddr;
     logic [TAG_WIDTH - 1 : 0] tagbank_rdata;
 
-    generate
-        for (w=0, w < DEPTH; w++)
-        begin : databanks
-            cache_bank #(
-                .DATA_WIDTH (`TAG_WIDTH),
-                .ADDR_WIDTH (DEPTH)
-            ) databank (
-                .clk,
-                .i_we (tagbank_we[w]),
-                .i_wdata(tagbank_wdata),
-                .i_waddr(tagbank_waddr),
-                .i_raddr(tagbank_raddr),
-                .o_rdata(tagbank_rdata)
-            );
-        end
-    endgenerate
+    cache_bank #(
+        .DATA_WIDTH (TAG_WIDTH),
+        .ADDR_WIDTH ($clog2(DEPTH))
+    ) tagbank (
+        .clk,
+        .i_we (tagbank_we),
+        .i_wdata(tagbank_wdata),
+        .i_waddr(tagbank_waddr),
+        .i_raddr(tagbank_raddr),
+        .o_rdata(tagbank_rdata)
+    );
 
     // Intermediate signals
     logic hit, miss, tag_hit;
@@ -113,19 +103,19 @@ module stream_buffer #(
     // Define tag hits
     always_comb
     begin
-        tag_hit = (sb_tag == tagbank_rdata[head_ptr]);
+        tag_hit = (sb_tag == tagbank_rdata);
         hit = tag_hit & (state == STATE_READY);
         miss = ~hit;
     end
 
     logic [4-1:0] databank_select;
     logic last_refill_word;
-    assign last_refill_word = databank_select[BURST_LENGTH-1] & mem_read_data.RVALID;
+    assign last_refill_word = databank_select[4-1] & mem_read_data.RVALID;
 
     //Wiring memory logics
     always_comb
     begin
-        mem_read_address.ARADDR = {r_tag + 2{1'b0}};
+        mem_read_address.ARADDR = {r_tag, 2'b00};
         mem_read_address.ARLEN = 4; // not sure
         mem_read_address.ARVALID = state == STATE_PREFETCH_REQUEST;
         mem_read_address.ARID = 4'd2;
@@ -137,36 +127,39 @@ module stream_buffer #(
     //Wiring Data Bank Signals
     always_comb
     begin
-        for (int i=0; i<DEPTH;i++)
-            databank_we[i] = '0;
-        if (state == STATE_REFILL_DATA && mem_read_data.RVALID)
-            databank_we[tail_ptr] = 1; // Only during refill
+        databank_we= '0;
+        if (state == STATE_FILL_DATA && mem_read_data.RVALID)
+            databank_we = 1; // Only during refill
 
         databank_wdata = mem_read_data.RDATA;
         databank_waddr = tail_ptr;
-        if (next_state == STATE_READY)
-                databank_raddr = (head_ptr+1)%DEPTH;
-            else
-                databank_raddr = head_ptr;
+        // if (next_state == STATE_READY)
+        //         databank_raddr = (head_ptr+1)%DEPTH;
+        //     else
+        //         databank_raddr = head_ptr;
     end
 
 
     //Wiring Tag Bank Signals
     always_comb
     begin
-        for (int i = 0; i < DEPTH; i++)
-            tagbank_we[i] = 1'b0;
+        if (state == STATE_FILL_DATA && mem_read_data.RVALID)
+            tagbank_we = 1; // Only during refill
     
         tagbank_wdata = r_tag;
         tagbank_waddr = tail_ptr;
         tagbank_raddr = head_ptr;
+        // if (next_state == STATE_READY)
+        //         databank_raddr = (head_ptr+1)%DEPTH;
+        //     else
+        //         databank_raddr = head_ptr;
     end
 
     //Wiring output data
     always_comb
     begin
         out.valid = hit;
-        out.data = databank_rdata[head_ptr];
+        out.data = databank_rdata;
     end
 
     // Finite State Machine transition
@@ -181,6 +174,11 @@ module stream_buffer #(
                     next_state = STATE_FILL_DATA;
             STATE_FILL_DATA:
                 if (!full && last_refill_word)
+                    next_state = STATE_READY;
+                else if (full && last_refill_word)
+                    next_state = STATE_WAIT;
+            STATE_WAIT:
+                if(!full)
                     next_state = STATE_READY;
         endcase
     end
@@ -229,6 +227,10 @@ module stream_buffer #(
                     //Update Tail pointer
                     tail_ptr <= (tail_ptr + 1) % DEPTH;
                 end
+                STATE_WAIT:
+                begin
+                end
+
             endcase
         end
     end

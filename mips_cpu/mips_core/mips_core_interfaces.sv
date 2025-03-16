@@ -103,7 +103,6 @@ interface hazard_control_ifc ();
 	modport out (output flush, stall);
 endinterface
 
-
 interface sb_ifc ();
 	logic sb_hit;
 	logic valid;	// Output Valid

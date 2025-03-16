@@ -56,6 +56,7 @@ module mips_core (
 	pc_ifc if_pc_current();
 	pc_ifc if_pc_next();
 	cache_output_ifc if_i_cache_output();
+	sb_ifc sb_ifc();
 
 	// ==== IF to DEC
 	pc_ifc i2d_pc();
@@ -112,8 +113,8 @@ module mips_core (
 	axi_write_address mem_write_address[1]();
 	axi_write_data mem_write_data[1]();
 	axi_write_response mem_write_response[1]();
-	axi_read_address mem_read_address[2]();
-	axi_read_data mem_read_data[2]();
+	axi_read_address mem_read_address[3]();
+	axi_read_data mem_read_data[3]();
 
 
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -130,14 +131,14 @@ module mips_core (
 	);
 
 	//Stream buffer delcaration
-	stream_buffer I_CACHE (
+	stream_buffer stream_buffer (
 		.clk, .rst_n,
 
 		.mem_read_address(mem_read_address[2]),
 		.mem_read_data   (mem_read_data[2]),
 
-		.i_pc_current (if_pc_current),
-		.i_pc_next    (if_pc_next),
+		.sb_pc_current (if_pc_current),
+		.sb_pc_next    (if_pc_next),
 
 		.out          (sb_ifc)
 	);
@@ -150,7 +151,7 @@ module mips_core (
 
 		.i_pc_current (if_pc_current),
 		.i_pc_next    (if_pc_next),
-		.i_sb_ifc     (sb_ifc),
+		.sb_in     (sb_ifc),
 		.out          (if_i_cache_output)
 	);
 	// If you want to change the line size and total size of instruction cache,
@@ -330,7 +331,7 @@ module mips_core (
 	// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 	// xxxx Memory Arbiter
 	// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-	memory_arbiter #(.WRITE_MASTERS(1), .READ_MASTERS(2)) MEMORY_ARBITER (
+	memory_arbiter #(.WRITE_MASTERS(1), .READ_MASTERS(3)) MEMORY_ARBITER (
 		.clk, .rst_n,
 		.axi_write_address,
 		.axi_write_data,
