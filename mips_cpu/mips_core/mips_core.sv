@@ -129,6 +129,19 @@ module mips_core (
 		.o_pc_next    (if_pc_next)
 	);
 
+	//Stream buffer delcaration
+	stream_buffer I_CACHE (
+		.clk, .rst_n,
+
+		.mem_read_address(mem_read_address[2]),
+		.mem_read_data   (mem_read_data[2]),
+
+		.i_pc_current (if_pc_current),
+		.i_pc_next    (if_pc_next),
+
+		.out          (sb_ifc)
+	);
+
 	i_cache I_CACHE(
 		.clk, .rst_n,
 
@@ -137,7 +150,7 @@ module mips_core (
 
 		.i_pc_current (if_pc_current),
 		.i_pc_next    (if_pc_next),
-
+		.i_sb_ifc     (sb_ifc),
 		.out          (if_i_cache_output)
 	);
 	// If you want to change the line size and total size of instruction cache,

@@ -178,7 +178,7 @@ module i_cache #(
             end
         end
         // Modify here for stream buffer
-        else if (sb_hit)
+        else if (sb_in.sb_hit)
         begin
             select_way = 1'b0;
         end
@@ -245,8 +245,8 @@ module i_cache #(
 
     always_comb
     begin
-        out.valid = (hit || sb_hit);
-        if (sb_hit)
+        out.valid = (hit || sb_in.sb_hit);
+        if (sb_in.sb_hit)
             out.data = sb_in.data;
         else
             out.data = databank_rdata[select_way][i_block_offset];
