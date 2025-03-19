@@ -14,6 +14,10 @@ module decode_stage_glue (
 	decoder_output_ifc.in i_decoded,
 	reg_file_output_ifc.in i_reg_data,
 
+	//reg rename input
+
+	reg_ren_ifc.in i_reg_ren,
+
 	branch_decoded_ifc.decode branch_decoded,	// Contains both i/o
 
 	alu_input_ifc.out o_alu_input,
@@ -22,31 +26,32 @@ module decode_stage_glue (
 
 	always_comb
 	begin
-		o_alu_input.valid =   i_decoded.valid;
-		o_alu_input.alu_ctl = i_decoded.alu_ctl;
-		o_alu_input.op1 =     i_reg_data.rs_data;
-		o_alu_input.op2 =     i_decoded.uses_immediate
-			? i_decoded.immediate
+		o_alu_input.valid =   i_reg_ren.next_instr.valid;
+		o_alu_input.alu_ctl = i_reg_ren.next_instr.alu_ctl;
+		o_alu_input.op1 =     i_reg_ren.next_instr.rs_data;
+		o_alu_input.op2 =     i_reg_ren.next_instr.uses_immediate
+			? i_reg_ren.next_instr.immediate
 			: i_reg_data.rt_data;
 
-		branch_decoded.valid =   i_decoded.is_branch_jump;
-		branch_decoded.is_jump = i_decoded.is_jump;
-		branch_decoded.target =  i_decoded.is_jump_reg
+		branch_decoded.valid =   i_reg_ren.next_instr.is_branch_jump;
+		branch_decoded.is_jump = i_reg_ren.next_instr.is_jump;
+		branch_decoded.target =  i_reg_ren.next_instr.is_jump_reg
 			? i_reg_data.rs_data[`ADDR_WIDTH - 1 : 0]
-			: i_decoded.branch_target;
+			: i_reg_ren.next_instr.branch_target;
 
 
-		o_alu_pass_through.is_branch =     i_decoded.is_branch_jump & ~i_decoded.is_jump;
+		o_alu_pass_through.is_branch =     i_reg_ren.next_instr.is_branch_jump &
+												~i_reg_ren.next_instr.is_jump;
 		o_alu_pass_through.prediction =    branch_decoded.prediction;
 		o_alu_pass_through.recovery_target = branch_decoded.recovery_target;
 
-		o_alu_pass_through.is_mem_access = i_decoded.is_mem_access;
-		o_alu_pass_through.mem_action =    i_decoded.mem_action;
+		o_alu_pass_through.is_mem_access = i_reg_ren.next_instr.is_mem_access;
+		o_alu_pass_through.mem_action =    i_reg_ren.next_instr.mem_action;
 
 		o_alu_pass_through.sw_data =       i_reg_data.rt_data;
 
-		o_alu_pass_through.uses_rw =       i_decoded.uses_rw;
-		o_alu_pass_through.rw_addr =       i_decoded.rw_addr;
+		o_alu_pass_through.uses_rw =       i_reg_ren.next_instr.uses_rw;
+		o_alu_pass_through.rw_addr =       i_reg_ren.next_instr.rw_phys;
 	end
 endmodule
 

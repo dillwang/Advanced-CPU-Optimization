@@ -65,6 +65,9 @@ module pr_d2e (
 	pc_ifc.in  i_pc,
 	pc_ifc.out o_pc,
 
+	//reg renaming
+	reg_ren_ifc.in i_reg_ren,
+
 	alu_input_ifc.in  i_alu_input,
 	alu_input_ifc.out o_alu_input,
 	alu_pass_through_ifc.in  i_alu_pass_through,

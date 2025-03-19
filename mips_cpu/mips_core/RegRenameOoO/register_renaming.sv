@@ -3,6 +3,8 @@
 //TODO: Separate into: Reg rename, Mispredict Recovery, Writeback, Commit, Branch Stack
 //for legibility
 
+//Change of plans, no more OoO for now, just RegRename, which means no separate stages needed
+
 `include "mips_core.svh"
 
 /*
@@ -128,6 +130,17 @@ module register_renaming (
                 rmt[i] = i;
                 rmt_backup[i] = i; //TODO: RECOVERY LOGIC
             end
+        end
+        else if (i_hc.flush) begin
+            // Restore RMT from backup
+            for (int i = 0; i < NUM_ARCH_REGS; i++) begin
+                rmt[i] <= rmt_backup[i];
+            end
+        end else if (decode_in.valid & decode_in.uses_rw) begin
+            // Update RMT and backup
+            rmt[decode_in.rw_addr] <= rw_phys;
+            rmt_backup[decode_in.rw_addr] <= rw_phys;
+            //TODO: This logic needs work
         end
     end
 
