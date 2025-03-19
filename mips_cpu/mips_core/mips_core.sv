@@ -406,6 +406,11 @@ module mips_core (
 			else
 				ls_event(e2m_d_cache_input.mem_action, e2m_d_cache_input.addr, e2m_d_cache_input.data);
 		end
+		$display("pc is %x", i2d_pc.pc);
+		$display("!i2d_hc.stall is %x", !i2d_hc.stall);
+		$display("!d2e_hc.flush is %x", !d2e_hc.flush);
+		$display("dec_decoder_output.valid is %x", dec_decoder_output.valid);
+		$display("i2d_inst.data %x", i2d_inst.data);
 	end
 `endif
 endmodule

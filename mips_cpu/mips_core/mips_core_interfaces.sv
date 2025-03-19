@@ -106,7 +106,7 @@ endinterface
 interface sb_ifc ();
 	logic sb_hit;
 	logic valid;	// Output Valid
-	logic [`DATA_WIDTH - 1 : 0] data;
+	logic [`DATA_WIDTH - 1 : 0] data [4];
 	modport in  (input sb_hit, valid, data);
 	modport out (output sb_hit, valid, data);
 endinterface

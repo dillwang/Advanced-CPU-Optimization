@@ -28,11 +28,18 @@ module stream_buffer #(
         import "DPI-C" function void stats_event(input string e);
     `endif
 
-    localparam TAG_WIDTH = `ADDR_WIDTH - 2;
+    localparam BLOCK_OFFSET_WIDTH = 2;
+    // Compute the number of words per line.
+    localparam LINE_SIZE = 1 << BLOCK_OFFSET_WIDTH;
+    // For consistency with i_cache’s tag extraction, assume:
+    localparam TAG_WIDTH = `ADDR_WIDTH - BLOCK_OFFSET_WIDTH - 2;
 
-    // Parsing
-    logic [TAG_WIDTH - 1 : 0] sb_tag;
-    logic [TAG_WIDTH - 1 : 0] sb_next_tag;
+    // Extract tag bits from the current and next PC.
+    // (In i_cache, the PC is split as {tag, index, block_offset}; here we only need the tag.)
+    logic [TAG_WIDTH-1:0] sb_tag;
+    logic [TAG_WIDTH-1:0] sb_next_tag;
+    assign sb_tag      = sb_pc_current.pc[`ADDR_WIDTH - 1 : BLOCK_OFFSET_WIDTH + 2];
+    assign sb_next_tag = sb_pc_next.pc[`ADDR_WIDTH - 1 : BLOCK_OFFSET_WIDTH + 2];
 
     // Head and Tail for FIFO
     logic [$clog2(DEPTH)-1 : 0] head_ptr;
@@ -41,10 +48,6 @@ module stream_buffer #(
 
     assign empty = (head_ptr == tail_ptr);
     assign full  = ((tail_ptr + 1) % DEPTH == head_ptr);
-    
-
-    assign sb_tag = sb_pc_current.pc[`ADDR_WIDTH - 1 : 2];
-    assign sb_next_tag = sb_pc_next.pc[`ADDR_WIDTH - 1 : 2];
 
     // Tag definition
     logic [TAG_WIDTH - 1 : 0] r_tag; // tag of for refilling
@@ -60,23 +63,28 @@ module stream_buffer #(
 
 
     //databank signals
-    logic databank_we;
-    logic [`DATA_WIDTH - 1 : 0] databank_wdata;
+    logic [LINE_SIZE-1:0] databank_we;
+    logic [`DATA_WIDTH - 1 : 0] databank_wdata [LINE_SIZE];
     logic [$clog2(DEPTH)-1 : 0] databank_waddr;
     logic [$clog2(DEPTH)-1 : 0] databank_raddr;
-    logic [`DATA_WIDTH - 1 : 0] databank_rdata;
+    logic [`DATA_WIDTH - 1 : 0] databank_rdata [LINE_SIZE];
     
-    cache_bank #(
-        .DATA_WIDTH (`DATA_WIDTH),
-        .ADDR_WIDTH ($clog2(DEPTH))
-    ) databank (
-        .clk,
-        .i_we (databank_we),
-        .i_wdata(databank_wdata),
-        .i_waddr(databank_waddr),
-        .i_raddr(databank_raddr),
-        .o_rdata(databank_rdata)
-    );
+    genvar g;
+    generate
+        for (g = 0; g < LINE_SIZE; g++) begin : databanks
+            cache_bank #(
+                .DATA_WIDTH (`DATA_WIDTH),
+                .ADDR_WIDTH ($clog2(DEPTH))
+            ) databank (
+                .clk,
+                .i_we (databank_we[g]),
+                .i_wdata(databank_wdata[g]),
+                .i_waddr(databank_waddr),
+                .i_raddr(databank_raddr),
+                .o_rdata(databank_rdata[g])
+            );
+        end
+    endgenerate
 
     // tagbank signals
     logic tagbank_we;
@@ -115,9 +123,9 @@ module stream_buffer #(
     //Wiring memory logics
     always_comb
     begin
-        mem_read_address.ARADDR = {r_tag, 2'b00};
-        mem_read_address.ARLEN = 4; // not sure
-        mem_read_address.ARVALID = state == STATE_PREFETCH_REQUEST;
+        mem_read_address.ARADDR = {r_tag, {BLOCK_OFFSET_WIDTH+2{1'b0}}};
+        mem_read_address.ARLEN = 4;
+        mem_read_address.ARVALID = (state == STATE_PREFETCH_REQUEST);
         mem_read_address.ARID = 4'd2;
         // Always ready to consume data
         mem_read_data.RREADY = 1'b1;
@@ -129,20 +137,24 @@ module stream_buffer #(
     begin
         databank_we= '0;
         if (state == STATE_FILL_DATA && mem_read_data.RVALID)
-            databank_we = 1; // Only during refill
+            databank_we = databank_select; // Only during refill
 
-        databank_wdata = mem_read_data.RDATA;
+        // Write the incoming data to all banks; only the one with enabled write will store it.
+        for (int i = 0; i < LINE_SIZE; i++) begin
+            databank_wdata[i] = mem_read_data.RDATA;
+        end
         databank_waddr = tail_ptr;
-        // if (next_state == STATE_READY)
-        //         databank_raddr = (head_ptr+1)%DEPTH;
-        //     else
-        //         databank_raddr = head_ptr;
+        if (next_state == STATE_READY)
+                databank_raddr = (head_ptr+1)%DEPTH;
+            else
+                databank_raddr = head_ptr;
     end
 
 
     //Wiring Tag Bank Signals
     always_comb
     begin
+        tagbank_we   = 1'b0;
         if (state == STATE_FILL_DATA && mem_read_data.RVALID)
             tagbank_we = 1; // Only during refill
     
@@ -159,7 +171,10 @@ module stream_buffer #(
     always_comb
     begin
         out.valid = hit;
-        out.data = databank_rdata;
+        for (int i = 0; i < LINE_SIZE; i++) begin
+            out.data[i] = databank_rdata[i];
+        end
+        out.sb_hit = hit & (state == STATE_READY);
     end
 
     // Finite State Machine transition
@@ -173,10 +188,11 @@ module stream_buffer #(
                 if (mem_read_address.ARREADY)
                     next_state = STATE_FILL_DATA;
             STATE_FILL_DATA:
-                if (!full && last_refill_word)
-                    next_state = STATE_READY;
-                else if (full && last_refill_word)
-                    next_state = STATE_WAIT;
+                if (last_refill_word)
+                    if (!full)
+                        next_state = STATE_READY;
+                    else
+                        next_state = STATE_WAIT;
             STATE_WAIT:
                 if(!full)
                     next_state = STATE_READY;
@@ -192,6 +208,7 @@ module stream_buffer #(
             head_ptr <= 0;
             tail_ptr <= 0;
             databank_select <= 1;
+            r_tag           <= 0;
         end
         else
         begin
@@ -204,10 +221,11 @@ module stream_buffer #(
                     begin
                         tail_ptr <= head_ptr;
                         r_tag <= sb_next_tag;
+                        databank_select <= 'b1;
                     end
                     else if (hit)
                     begin
-                        r_tag <= r_tag + 4;
+                        r_tag <= r_tag + 1;
                         head_ptr <= (head_ptr + 1) % DEPTH;
                     end
                     else

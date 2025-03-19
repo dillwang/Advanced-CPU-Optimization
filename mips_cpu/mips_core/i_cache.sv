@@ -4,7 +4,7 @@
  * Revision : Sankara           
  * Last Revision: 04/04/2023
  *
- * This is a direct-mapped instruction cache. Line size and depth (number of
+ * This is a 2 way associate instruction cache. Line size and depth (number of
  * lines) are set via INDEX_WIDTH and BLOCK_OFFSET_WIDTH parameters. Notice that
  * line size means number of words (each consist of 32 bit) in a line. Because
  * all addresses in mips_core are 26 byte addresses, so the sum of TAG_WIDTH,
@@ -92,7 +92,8 @@ module i_cache #(
     // databank signals
     logic [LINE_SIZE - 1 : 0] databank_select;
     logic [LINE_SIZE - 1 : 0] databank_we[ASSOCIATIVITY];
-    logic [`DATA_WIDTH - 1 : 0] databank_wdata;
+    //logic [`DATA_WIDTH - 1 : 0] databank_wdata;
+    logic [`DATA_WIDTH - 1 : 0] databank_wdata[LINE_SIZE];
     logic [INDEX_WIDTH - 1 : 0] databank_waddr;
     logic [INDEX_WIDTH - 1 : 0] databank_raddr;
     logic [`DATA_WIDTH - 1 : 0] databank_rdata [ASSOCIATIVITY][LINE_SIZE];
@@ -101,8 +102,7 @@ module i_cache #(
     logic r_select_way;
     logic [DEPTH - 1 : 0] lru_rp;
 
-
-
+    logic stream_buffer_hit;
     // databanks
     genvar g,w;
     generate
@@ -116,10 +116,10 @@ module i_cache #(
                 ) databank (
                     .clk,
                     .i_we (databank_we[w][g]),
-                    .i_wdata(databank_wdata),
+                    // .i_wdata(databank_wdata),
+                    .i_wdata(databank_wdata[g]),
                     .i_waddr(databank_waddr),
                     .i_raddr(databank_raddr),
-
                     .o_rdata(databank_rdata[w][g])
                 );
             end
@@ -158,14 +158,15 @@ module i_cache #(
     logic hit, miss, tag_hit;
     logic last_refill_word;
 
-
     always_comb
     begin
         tag_hit = ( ((i_tag == tagbank_rdata[0]) & valid_bits[0][i_index])
                   | ((i_tag == tagbank_rdata[1]) & valid_bits[1][i_index]));
-        hit = (tag_hit) & (state == STATE_READY);
+        hit = (tag_hit) && (state == STATE_READY);
+        stream_buffer_hit = (sb_in.sb_hit) && (state == STATE_READY);
         miss = ~hit;
         last_refill_word = databank_select[LINE_SIZE - 1] & mem_read_data.RVALID;
+
 
         if (hit)
         begin
@@ -179,10 +180,11 @@ module i_cache #(
             end
         end
         // Modify here for stream buffer
-        else if (sb_in.sb_hit)
+        else if (stream_buffer_hit)
         begin
-            select_way = 1'b0;
+            select_way = r_select_way;
         end
+
         else if (miss)
         begin
             select_way = lru_rp[i_index];
@@ -191,7 +193,6 @@ module i_cache #(
         begin
             select_way = 'b0;
         end
-        
     end
 
     always_comb
@@ -214,14 +215,16 @@ module i_cache #(
         if (state == STATE_REFILL_DATA && mem_read_data.RVALID) begin
             databank_we[r_select_way] = databank_select; // Only during refill
 
-            databank_wdata = mem_read_data.RDATA;
+            databank_wdata[databank_select] = mem_read_data.RDATA;
         end
         else if (state == STATE_STREAM_REFILL && sb_in.valid) begin
             databank_we[r_select_way] = {LINE_SIZE{1'b1}};
-            databank_wdata = sb_in.data;
+            //databank_wdata[i_block_offset] = sb_in.data[i_block_offset];
+            for (int i = 0; i < LINE_SIZE; i++)
+                databank_wdata[i] = sb_in.data[i];  // Write all words
         end
         else begin
-            databank_wdata = mem_read_data.RDATA;
+            databank_wdata[databank_select] = mem_read_data.RDATA;
         end
 
         databank_waddr = r_index;
@@ -236,9 +239,9 @@ module i_cache #(
         for (int i = 0; i < ASSOCIATIVITY; i++)
             tagbank_we[i] = 1'b0;
 
-        if (last_refill_word)
+        if (last_refill_word || state == STATE_STREAM_REFILL)
             tagbank_we[r_select_way] = 1'b1;
-    
+
         tagbank_wdata = r_tag;
         tagbank_waddr = r_index;
         tagbank_raddr = i_index_next;
@@ -246,9 +249,22 @@ module i_cache #(
 
     always_comb
     begin
-        out.valid = (hit || sb_in.sb_hit);
-        if (sb_in.sb_hit)
-            out.data = sb_in.data;
+        // out.valid = (hit || stream_buffer_hit);
+        out.valid = hit;
+        // out.data = databank_rdata[select_way][i_block_offset];
+
+        // if (state == STATE_STREAM_REFILL)
+        //     out.data = sb_in.data[i_block_offset];
+        // else
+        //     out.data = databank_rdata[select_way][i_block_offset];
+
+        if (stream_buffer_hit && state == STATE_READY)
+        begin
+            out.valid = 1'b1;
+            out.data = sb_in.data[i_block_offset];  // Use stream buffer data directly
+        end
+        else if (state == STATE_STREAM_REFILL)
+            out.data = sb_in.data[i_block_offset];
         else
             out.data = databank_rdata[select_way][i_block_offset];
     end
@@ -258,10 +274,11 @@ module i_cache #(
         next_state = state;
         unique case (state)
             STATE_READY:
-                if (miss && !sb_in.valid)
+                //if (miss && !(stream_buffer_hit))
+                if (miss)
                     next_state = STATE_REFILL_REQUEST;
-                else if (miss && sb_in.valid)
-                    next_state = STATE_STREAM_REFILL;
+                // else if (miss && stream_buffer_hit)
+                //     next_state = STATE_STREAM_REFILL;
             STATE_REFILL_REQUEST:
                 if (mem_read_address.ARREADY)
                     next_state = STATE_REFILL_DATA;
@@ -350,10 +367,20 @@ module i_cache #(
         end
     end
 
-
     always_ff @(posedge clk)
     begin
         if(hit) stats_event("I-Cache_hit");
         if(miss) stats_event("I-Cache_miss");
     end
+
+
+    `ifdef SIMULATION
+	always_ff @(posedge clk)
+	begin
+        $display("output valid is %x", out.valid);
+        $display("output data is %x", out.data);
+    end
+    `endif
 endmodule
+
+
