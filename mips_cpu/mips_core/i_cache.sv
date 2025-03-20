@@ -171,7 +171,7 @@ module i_cache #(
         last_sb_word = streambuffer_select[LINE_SIZE - 1];
         stream_buffer_hit = (sb_in.sb_hit) & (state == STATE_READY);
 
-        if (hit || stream_buffer_hit)
+        if (hit || sb_in.sb_hit)
         begin
             if (i_tag == tagbank_rdata[0])
             begin
@@ -271,7 +271,7 @@ module i_cache #(
                 if (last_refill_word)
                     next_state = STATE_READY;
             STATE_STREAM_REFILL:
-                if (last_sb_word)
+                if (last_sb_word || !sb_in.sb_hit)
                     next_state = STATE_READY;
         endcase
     end
@@ -295,7 +295,7 @@ module i_cache #(
             case (state)
                 STATE_READY:
                 begin
-                    if (miss & !stream_buffer_hit)
+                    if (miss & !sb_in.sb_hit & !sb_in.hit_reserve)
                     begin
                         r_tag <= i_tag;
                         r_index <= i_index;
@@ -319,10 +319,10 @@ module i_cache #(
                     end
                 end
                 STATE_STREAM_REFILL: begin
-                    //if (sb_in.valid) begin
+                    if (sb_in.sb_hit) begin
                         streambuffer_select <= {streambuffer_select[LINE_SIZE - 2 : 0],
                             streambuffer_select[LINE_SIZE - 1]};
-                    //end
+                    end
                     if (last_sb_word)
                     begin
                         valid_bits[r_select_way][r_index] <= 1'b1;
@@ -366,15 +366,15 @@ module i_cache #(
         if(miss & !stream_buffer_hit) stats_event("Stream_Buffer_miss");
     end
 
-    // `ifdef SIMULATION
-    //     always_ff @(posedge clk)
-    //     begin
-    //         $display("STATE = %x, NEXT STATE = %x", state, next_state);
-    //         if(sb_in.sb_hit & miss) begin
-    //             $display("Stream buffer hits, using stream buffer data %x, for pc of %x", sb_in.data, i_pc_current.pc);
-    //             $display("");
-    //         end
+    `ifdef SIMULATION
+        always_ff @(posedge clk)
+        begin
+            $display("STATE = %x, NEXT STATE = %x", state, next_state);
+            if(sb_in.sb_hit & miss) begin
+                $display("Stream buffer hits, using stream buffer data %x, for pc of %x", sb_in.data, i_pc_current.pc);
+                $display("");
+            end
          
-    //     end
-    // `endif
+        end
+    `endif
 endmodule

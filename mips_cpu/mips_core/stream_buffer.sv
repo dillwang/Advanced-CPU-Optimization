@@ -37,9 +37,10 @@ module stream_buffer #(
     logic [TAG_WIDTH - 1 : 0] sb_tag;
     logic [TAG_WIDTH -1 :0] sb_next_tag;
     logic [BLOCK_OFFSET_WIDTH - 1 : 0] sb_block_offset;
+    logic [BLOCK_OFFSET_WIDTH - 1 : 0] sb_next_block_offset;
     
     assign {sb_tag, sb_block_offset} = sb_pc_current.pc[`ADDR_WIDTH - 1 : 2];
-    assign {sb_next_tag} = sb_pc_next.pc[`ADDR_WIDTH - 1 : BLOCK_OFFSET_WIDTH + 2];
+    assign {sb_next_tag, sb_next_block_offset} = sb_pc_next.pc[`ADDR_WIDTH - 1 : 2];
 
     // Head and Tail for FIFO
     logic [$clog2(DEPTH)-1 : 0] head_ptr;
@@ -49,7 +50,8 @@ module stream_buffer #(
     logic out_valid;
 
     assign empty = (head_ptr == tail_ptr);
-    assign full  = (tail_ptr + 1 == head_ptr);
+    assign full = (((tail_ptr + 1) % DEPTH) == head_ptr);
+
 
     // Tag definition
     logic [TAG_WIDTH - 1 : 0] r_tag; // tag of for refilling
@@ -159,8 +161,8 @@ module stream_buffer #(
         // for (int i = 0; i < LINE_SIZE; i++) begin
         //     databank_wdata[i] = mem_read_data.RDATA;
         // end
-        if (sb_block_offset == 3)
-                databank_raddr = head_ptr+1;
+        if (sb_block_offset == 3 || (sb_block_offset != 0 & sb_next_block_offset==0))
+                databank_raddr = (head_ptr+1)%DEPTH;
             else
                 databank_raddr = head_ptr;
     end
@@ -171,8 +173,8 @@ module stream_buffer #(
         tagbank_we = last_refill_word;
 		tagbank_wdata = r_tag;
 		tagbank_waddr = tail_ptr;
-        if (sb_block_offset == 3)
-            tagbank_raddr = head_ptr+1;
+        if (sb_block_offset == 3 || (sb_block_offset != 0 & sb_next_block_offset==0))
+            tagbank_raddr = (head_ptr+1)%DEPTH;
         else
 		    tagbank_raddr = head_ptr;
     end
@@ -183,6 +185,7 @@ module stream_buffer #(
         out.valid = out_valid;
         out.sb_hit = hit;
         out.data = databank_rdata[sb_block_offset];
+        out.hit_reserve = r_tag_hit;
         //out.valid = 0;
         //out.sb_hit = 0;
         // for (int i = 0; i < LINE_SIZE; i = i + 1) begin
@@ -197,7 +200,7 @@ module stream_buffer #(
         next_state = state;
         unique case (state)
             STATE_READY:
-                if (sb_block_offset == 3)
+                if (sb_block_offset == 3 || (sb_block_offset != 0 & sb_next_block_offset==0))
                     next_state = STATE_PREFETCH_REQUEST;
             STATE_PREFETCH_REQUEST:
                 if (mem_read_address.ARREADY)
@@ -222,6 +225,7 @@ module stream_buffer #(
             databank_select <= 1;
             for (int i=0; i<DEPTH; i++)
                 valid_bits[i] <= '0;
+            out_valid <= 0;
         end
         else
         begin
@@ -232,16 +236,16 @@ module stream_buffer #(
                 begin
                     if (miss)
                     begin
-                        tail_ptr <= 0 ;
-                        head_ptr <= 0 ;
+                        tail_ptr <= head_ptr;
                         r_tag <= sb_next_tag;
                         databank_select <= 1;
                         for (int i=0; i<DEPTH; i++)
                             valid_bits[i] <= '0;
+                        out_valid <= 0;
                     end
                     else if (hit)
                     begin
-                        if (sb_block_offset == 3) begin
+                        if (sb_block_offset == 3 || (sb_block_offset != 0 & sb_next_block_offset==0)) begin // OR 
                             r_tag <= r_tag + 1;
                             head_ptr <= head_ptr + 1;
                             valid_bits[head_ptr] <= 0;
@@ -267,6 +271,7 @@ module stream_buffer #(
                     if (last_refill_word)
                     begin;
                         //Update Tail pointer
+                        out_valid <= 1;
                         tail_ptr <= tail_ptr + 1;
                         valid_bits[tail_ptr] <= 1'b1;
                     end
@@ -285,14 +290,16 @@ module stream_buffer #(
         if(r_tag_hit) stats_event("R_tag_hit");
     end
 
-    // `ifdef SIMULATION
-    //     always_ff @(posedge clk)
-    //     begin
-    //         $display("tag reserve is %x", tag_reserve);
-    //         if(hit) begin
-    //             $display("Stream buffer hits data is %x for pc = %x", databank_rdata[sb_block_offset], sb_pc_current.pc);
-    //             $display("Blockoffset is %x", sb_block_offset);
-    //         end
-    //     end
-    // `endif
+    `ifdef SIMULATION
+        always_ff @(posedge clk)
+        begin
+            $display("SB State is %x", state);
+            $display("Blockoffset is %x", sb_block_offset);
+            if(hit) begin
+                $display("Stream buffer hits data is %x for pc = %x", databank_rdata[sb_block_offset], sb_pc_current.pc);
+                $display("Head pointer is %x, Tail pointer is %x", head_ptr, tail_ptr);
+
+            end
+        end
+    `endif
 endmodule
