@@ -91,9 +91,10 @@ module i_cache #(
 
     // databank signals
     logic [LINE_SIZE - 1 : 0] databank_select;
+    logic [LINE_SIZE - 1 : 0] streambuffer_select;
     logic [LINE_SIZE - 1 : 0] databank_we[ASSOCIATIVITY];
-    //logic [`DATA_WIDTH - 1 : 0] databank_wdata;
-    logic [`DATA_WIDTH - 1 : 0] databank_wdata[LINE_SIZE];
+    logic [`DATA_WIDTH - 1 : 0] databank_wdata;
+    //logic [`DATA_WIDTH - 1 : 0] databank_wdata[LINE_SIZE];
     logic [INDEX_WIDTH - 1 : 0] databank_waddr;
     logic [INDEX_WIDTH - 1 : 0] databank_raddr;
     logic [`DATA_WIDTH - 1 : 0] databank_rdata [ASSOCIATIVITY][LINE_SIZE];
@@ -102,7 +103,7 @@ module i_cache #(
     logic r_select_way;
     logic [DEPTH - 1 : 0] lru_rp;
 
-    logic stream_buffer_hit;
+
     // databanks
     genvar g,w;
     generate
@@ -116,8 +117,8 @@ module i_cache #(
                 ) databank (
                     .clk,
                     .i_we (databank_we[w][g]),
-                    // .i_wdata(databank_wdata),
-                    .i_wdata(databank_wdata[g]),
+                    .i_wdata(databank_wdata),
+                    //.i_wdata(databank_wdata[g]),
                     .i_waddr(databank_waddr),
                     .i_raddr(databank_raddr),
                     .o_rdata(databank_rdata[w][g])
@@ -157,18 +158,20 @@ module i_cache #(
     // Intermediate signals
     logic hit, miss, tag_hit;
     logic last_refill_word;
+    logic last_sb_word;
+    logic stream_buffer_hit;
 
     always_comb
     begin
         tag_hit = ( ((i_tag == tagbank_rdata[0]) & valid_bits[0][i_index])
                   | ((i_tag == tagbank_rdata[1]) & valid_bits[1][i_index]));
-        hit = (tag_hit) && (state == STATE_READY);
-        stream_buffer_hit = (sb_in.sb_hit) && (state == STATE_READY);
+        hit = (tag_hit) & (state == STATE_READY);
         miss = ~hit;
         last_refill_word = databank_select[LINE_SIZE - 1] & mem_read_data.RVALID;
+        last_sb_word = streambuffer_select[LINE_SIZE - 1];
+        stream_buffer_hit = (sb_in.sb_hit) & (state == STATE_READY);
 
-
-        if (hit)
+        if (hit || stream_buffer_hit)
         begin
             if (i_tag == tagbank_rdata[0])
             begin
@@ -179,12 +182,6 @@ module i_cache #(
                 select_way = 'b1;
             end
         end
-        // Modify here for stream buffer
-        else if (stream_buffer_hit)
-        begin
-            select_way = r_select_way;
-        end
-
         else if (miss)
         begin
             select_way = lru_rp[i_index];
@@ -211,20 +208,18 @@ module i_cache #(
     always_comb
     begin
         for (int i=0; i<ASSOCIATIVITY;i++)
-            databank_we[i] = '0;
+            databank_we[i] = 0;
         if (state == STATE_REFILL_DATA && mem_read_data.RVALID) begin
             databank_we[r_select_way] = databank_select; // Only during refill
 
-            databank_wdata[databank_select] = mem_read_data.RDATA;
+            databank_wdata= mem_read_data.RDATA;
         end
-        else if (state == STATE_STREAM_REFILL && sb_in.valid) begin
-            databank_we[r_select_way] = {LINE_SIZE{1'b1}};
-            //databank_wdata[i_block_offset] = sb_in.data[i_block_offset];
-            for (int i = 0; i < LINE_SIZE; i++)
-                databank_wdata[i] = sb_in.data[i];  // Write all words
+        else if (state == STATE_STREAM_REFILL) begin
+            databank_we[r_select_way] = streambuffer_select;
+            databank_wdata = sb_in.data;
         end
         else begin
-            databank_wdata[databank_select] = mem_read_data.RDATA;
+            databank_wdata = mem_read_data.RDATA;
         end
 
         databank_waddr = r_index;
@@ -239,7 +234,7 @@ module i_cache #(
         for (int i = 0; i < ASSOCIATIVITY; i++)
             tagbank_we[i] = 1'b0;
 
-        if (last_refill_word || state == STATE_STREAM_REFILL)
+        if (last_refill_word || last_sb_word)
             tagbank_we[r_select_way] = 1'b1;
 
         tagbank_wdata = r_tag;
@@ -249,22 +244,11 @@ module i_cache #(
 
     always_comb
     begin
-        // out.valid = (hit || stream_buffer_hit);
-        out.valid = hit;
+        // out.valid = hit;
         // out.data = databank_rdata[select_way][i_block_offset];
-
-        // if (state == STATE_STREAM_REFILL)
-        //     out.data = sb_in.data[i_block_offset];
-        // else
-        //     out.data = databank_rdata[select_way][i_block_offset];
-
-        if (stream_buffer_hit && state == STATE_READY)
-        begin
-            out.valid = 1'b1;
-            out.data = sb_in.data[i_block_offset];  // Use stream buffer data directly
-        end
-        else if (state == STATE_STREAM_REFILL)
-            out.data = sb_in.data[i_block_offset];
+        out.valid = (hit || sb_in.sb_hit);
+        if (sb_in.sb_hit)
+            out.data = sb_in.data;
         else
             out.data = databank_rdata[select_way][i_block_offset];
     end
@@ -274,11 +258,12 @@ module i_cache #(
         next_state = state;
         unique case (state)
             STATE_READY:
-                //if (miss && !(stream_buffer_hit))
-                if (miss)
+                if (miss & sb_in.sb_hit)
+                    next_state = STATE_STREAM_REFILL;
+                else if( miss & sb_in.hit_reserve)
+                    next_state = STATE_STREAM_REFILL;
+                else if (miss)
                     next_state = STATE_REFILL_REQUEST;
-                // else if (miss && stream_buffer_hit)
-                //     next_state = STATE_STREAM_REFILL;
             STATE_REFILL_REQUEST:
                 if (mem_read_address.ARREADY)
                     next_state = STATE_REFILL_DATA;
@@ -286,7 +271,8 @@ module i_cache #(
                 if (last_refill_word)
                     next_state = STATE_READY;
             STATE_STREAM_REFILL:
-                next_state = STATE_READY;
+                if (last_sb_word)
+                    next_state = STATE_READY;
         endcase
     end
 
@@ -296,6 +282,7 @@ module i_cache #(
         begin
             state <= STATE_READY;
             databank_select <= 1;
+            streambuffer_select <=1;
             for (int i=0; i<ASSOCIATIVITY;i++)
                 valid_bits[i] <= '0;
             for (int i=0; i<DEPTH;i++)
@@ -308,7 +295,7 @@ module i_cache #(
             case (state)
                 STATE_READY:
                 begin
-                    if (miss)
+                    if (miss & !stream_buffer_hit)
                     begin
                         r_tag <= i_tag;
                         r_index <= i_index;
@@ -320,9 +307,10 @@ module i_cache #(
                 end
                 STATE_REFILL_DATA:
                 begin
-                    if (mem_read_data.RVALID)
+                    if (mem_read_data.RVALID) begin
                         databank_select <= {databank_select[LINE_SIZE - 2 : 0],
                             databank_select[LINE_SIZE - 1]};
+                    end
 
                     if (last_refill_word)
                     begin
@@ -331,13 +319,16 @@ module i_cache #(
                     end
                 end
                 STATE_STREAM_REFILL: begin
-                    // Here we use stream buffer data to update the cache banks.
-                    // In this example, we assume the stream buffer delivers a full line.
-                    // The write-enable for all words is already asserted in combinational logic.
-                    // You may need additional logic if your cache_bank instances require separate data handling.
-                    valid_bits[r_select_way][r_index] <= 1'b1;
-                    valid_bits[~r_select_way][r_index] <= valid_bits[~r_select_way][r_index]; // Retain the other way's valid bit
-                end
+                    //if (sb_in.valid) begin
+                        streambuffer_select <= {streambuffer_select[LINE_SIZE - 2 : 0],
+                            streambuffer_select[LINE_SIZE - 1]};
+                    //end
+                    if (last_sb_word)
+                    begin
+                        valid_bits[r_select_way][r_index] <= 1'b1;
+                        valid_bits[~r_select_way][r_index] <= valid_bits[~r_select_way][r_index]; // Retain the other way's valid bit
+                    end
+                end 
             endcase
         end
     end
@@ -371,16 +362,19 @@ module i_cache #(
     begin
         if(hit) stats_event("I-Cache_hit");
         if(miss) stats_event("I-Cache_miss");
+        if(miss & stream_buffer_hit) stats_event("Stream_Buffer_hit");
+        if(miss & !stream_buffer_hit) stats_event("Stream_Buffer_miss");
     end
 
-
-    `ifdef SIMULATION
-	always_ff @(posedge clk)
-	begin
-        $display("output valid is %x", out.valid);
-        $display("output data is %x", out.data);
-    end
-    `endif
+    // `ifdef SIMULATION
+    //     always_ff @(posedge clk)
+    //     begin
+    //         $display("STATE = %x, NEXT STATE = %x", state, next_state);
+    //         if(sb_in.sb_hit & miss) begin
+    //             $display("Stream buffer hits, using stream buffer data %x, for pc of %x", sb_in.data, i_pc_current.pc);
+    //             $display("");
+    //         end
+         
+    //     end
+    // `endif
 endmodule
-
-
