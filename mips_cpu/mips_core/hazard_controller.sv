@@ -44,7 +44,9 @@ module hazard_controller (
     hazard_control_ifc.out m2w_hc,
 
     // Load pc output
-    load_pc_ifc.out load_pc
+    load_pc_ifc.out load_pc,
+
+    input logic [`ADDR_WIDTH - 1 : 0] branch_stack_recovery
 );
 
     branch_controller BRANCH_CONTROLLER (
@@ -202,5 +204,6 @@ module hazard_controller (
         if (mem_flush) stats_event("mem_flush");
     end
 `endif
+
 
 endmodule

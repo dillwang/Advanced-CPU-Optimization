@@ -17,6 +17,7 @@ module forward_unit (
 	// Input from decoder
 	decoder_output_ifc.in decoded,
 	reg_file_output_ifc.in reg_data,
+	reg_ren_ifc.in rr_ifc,
 
 	// Feedback from EX stage
 	alu_pass_through_ifc.in ex_ctl,
@@ -63,7 +64,7 @@ module forward_unit (
 		input logic uses_rs;
 		input logic uses_rt;
 		input mips_core_pkg::MipsReg rs_addr;
-		input mips_core_pkg::MipsReg rt_addr;
+		input mips_core_pkg::MipsReg rt_addr;	//TODO: make these work with 64 regs somehow
 
 		input logic condition;
 		input mips_core_pkg::MipsReg r_source;
@@ -80,18 +81,18 @@ module forward_unit (
 		out.rt_data = reg_data.rt_data;
 
 		// Forward WB stage
-		check_forward(decoded.uses_rs, decoded.uses_rt,
-			decoded.rs_addr, decoded.rt_addr,
+		check_forward(rr_ifc.uses_rs, rr_ifc.uses_rt,
+			rr_ifc.rs_phys, rr_ifc.rt_phys,
 			wb.uses_rw, wb.rw_addr, wb.rw_data);
 
 		// Forward MEM stage
-		check_forward(decoded.uses_rs, decoded.uses_rt,
-			decoded.rs_addr, decoded.rt_addr,
+		check_forward(rr_ifc.uses_rs, rr_ifc.uses_rt,
+			rr_ifc.rs_ph, rr_ifc.rt_phys,
 			mem.uses_rw, mem.rw_addr, mem.rw_data);
 
 		// Forward EX stage
-		check_forward(decoded.uses_rs, decoded.uses_rt,
-			decoded.rs_addr, decoded.rt_addr,
+		check_forward(rr_ifc.uses_rs, rr_ifc.uses_rt,
+			rr_ifc.rs_phys, rr_ifc.rt_phys,
 			ex_data.valid & ex_ctl.uses_rw & ~ex_ctl.is_mem_access,
 			ex_ctl.rw_addr, ex_data.result);
 	end
@@ -99,8 +100,8 @@ module forward_unit (
 	always_comb
 	begin
 		o_lw_hazard = ex_data.valid & ex_ctl.uses_rw & ex_ctl.is_mem_access
-			& ((decoded.uses_rs & (decoded.rs_addr == ex_ctl.rw_addr))
-				| (decoded.uses_rt & (decoded.rt_addr == ex_ctl.rw_addr)));
+			& ((rr_ifc.uses_rs & (rr_ifc.rs_phys == ex_ctl.rw_addr))
+				| (rr_ifc.uses_rt & (rr_ifc.rt_phys == ex_ctl.rw_addr)));
 	end
 
 endmodule

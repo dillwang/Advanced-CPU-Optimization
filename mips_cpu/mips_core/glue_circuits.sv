@@ -16,7 +16,7 @@ module decode_stage_glue (
 
 	//reg rename input
 
-	reg_ren_ifc.in i_reg_ren,
+	reg_ren_ifc.in i_reg_ren, //check if this should be .in or .out
 
 	branch_decoded_ifc.decode branch_decoded,	// Contains both i/o
 

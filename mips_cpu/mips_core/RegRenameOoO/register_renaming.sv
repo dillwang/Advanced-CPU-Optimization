@@ -87,13 +87,9 @@ module register_renaming (
     decoder_output_ifc.in decode_in,
     hazard_control_ifc.in i_hc,
     reg_ren_ifc.out out,   //Handle with HC stall logic
-
-
-    //TODO: put these in IQ and send through
-    alu_input_ifc.in  i_alu_input,
-	alu_input_ifc.out o_alu_input,
-	alu_pass_through_ifc.in  i_alu_pass_through,
-	alu_pass_through_ifc.out o_alu_pass_through
+    branch_decoded_ifc.in bdc,
+    branch_result_ifc.in ex_branch_result,
+    output logic [`ADDR_WIDTH - 1 : 0] branch_stack_recovery
 );
 
 //TODO: Branch stack for recovery
@@ -119,28 +115,22 @@ module register_renaming (
     logic al_rev;
     logic al_rev_size;
 
-    logic[32] instr_ctr;
+    logic [32] instr_ctr;
 
     logic [5:0] rmt [NUM_ARCH_REGS];
-    logic [5:0] rmt_backup [NUM_ARCH_REGS];
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (~rst_n) begin //reset logic
             for (int i = 0; i < NUM_ARCH_REGS; i++) begin
                 rmt[i] = i;
-                rmt_backup[i] = i; //TODO: RECOVERY LOGIC
             end
         end
         else if (i_hc.flush) begin
-            // Restore RMT from backup
-            for (int i = 0; i < NUM_ARCH_REGS; i++) begin
-                rmt[i] <= rmt_backup[i];
-            end
+            // Restore RMT from backup USE BRANCH STACK
+            
         end else if (decode_in.valid & decode_in.uses_rw) begin
-            // Update RMT and backup
+            // Update RMT
             rmt[decode_in.rw_addr] <= rw_phys;
-            rmt_backup[decode_in.rw_addr] <= rw_phys;
-            //TODO: This logic needs work
         end
     end
 
@@ -204,7 +194,7 @@ module register_renaming (
         logic uses_immediate;
         logic [`DATA_WIDTH - 1 : 0] immediate;
         logic uses_rw;
-        logic[32] count;
+        logic [32] count;
     } Instr_Queue_Entry_t;
 
     //instr q: Squash: set Writeback bit to 0
@@ -217,11 +207,7 @@ module register_renaming (
         end
         else begin
             if (decode_in.valid & decode_in.uses_rw) begin
-            //TODO does this work the way I'm using it? It seems
-             // to only be high if theres a memory access. How do I correctly do this?
             //fetch new phys reg from free list
-
-            //TODO: Separate reg renaming from rest of putting stuff into struct
 
             //TODO: how do I separate the non-alu instructions to not do all this
             fl_r_en <= 1;
@@ -252,8 +238,8 @@ module register_renaming (
             out.next_instr.rt_phys <= rmt[decode_in.rt_addr];
             //are operands ready?
             out.next_instr.ready <=
-                !(busy_table[rmt[decode_in.rs_addr]
-                & busy_table[rmt[decode_in.rt_addr]]]);
+                (busy_table[rmt[decode_in.rs_addr]]
+                & busy_table[rmt[decode_in.rt_addr]]);
             out.next_instr.valid <= decode_in.valid;
             out.next_instr.is_branch_jump <= decode_in.is_branch_jump;
             out.next_instr.is_jump <= decode_in.is_jump;
@@ -265,9 +251,9 @@ module register_renaming (
             out.next_instr.uses_rt <= decode_in.uses_rt;
             out.next_instr.uses_rw <= decode_in.uses_rw;
             out.next_instr.uses_immediate <= decode_in.uses_immediate;
-            out.instr_wr <= 1;  //TODO: how do I make this make sense
+            out.instr_wr <= 1;
             //instr tagged with counter
-            out.count <= instr_ctr;
+            out.next_instr.count <= instr_ctr;
         end
         fl_r_en <= 0;
         al_w_en <= 0;
@@ -277,7 +263,7 @@ module register_renaming (
 
     //BUSY BIT TABLE
 
-    logic busy_table [64];
+    logic busy_table ['d64];
 
     //reg is busy if bit is high
     //make bit high when moving to active list(?)
@@ -290,11 +276,6 @@ module register_renaming (
         end
         */
 
-        // Set busy bit when a register is renamed
-        if (rename_valid && rename_uses_rw) begin
-            busy_table[rename_phys_reg] <= 1; // Set busy bit for the new physical register
-        end
-
         // Clear busy bit when a register is written back
         if (writeback_valid) begin
             busy_table[writeback_phys_reg] <= 0; // Clear busy bit for the written-back register
@@ -305,20 +286,66 @@ module register_renaming (
     always_ff @(posedge clk) begin
         if (i_hc.flush) begin
             // Restore RMT from backup
+            /*
             for (int i = 0; i < NUM_ARCH_REGS; i++) begin
                 rmt[i] <= rmt_backup[i];
             end
+            */
 
             // Reset active list (rollback speculative writes)
+            al_rev_size <= al_head - mispredict_diff;
             al_rev <= 1;
-            al_rev_size <= al_head - mispredict_point;
+            fl_rev_size <= fl_head - mispredict_diff;
             fl_rev <= 1;
-            fl_rev_size <= fl_head - mispredict_point;
-            instr_ctr <= instr_ctr - (fl_head - mispredict_point);
         end
         al_rev <= 0;
         fl_rev <= 0;
     end
+
+    typedef struct {
+        logic [5:0] rmt_backup [NUM_ARCH_REGS];
+        logic busy_table_backup ['d64];
+        logic [`ADDR_WIDTH - 1 : 0] alt_addr;
+        logic [32] ctr;
+    } Branch_Stack_Entry_t;
+
+    logic [32] mispredict_diff;
+
+    Branch_Stack_Entry_t Branch_Stack [4];
+    logic [1:0] BS_w_ptr;
+    logic [1:0] BS_r_ptr;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            BS_w_ptr   <= 0;
+            BS_r_ptr   <= 0;
+            Branch_Stack <= '{default: 0};
+        end else begin
+            // Write logic
+            if (decode_in.is_branch ) begin
+                Branch_Stack[BS_w_ptr].alt_addr <= bdc.recovery_target;
+                Branch_Stack[BS_w_ptr].busy_table_backup <= busy_table;
+                Branch_Stack[BS_w_ptr].rmt_backup <= rmt;
+                Branch_Stack[BS_w_ptr].ctr <= instr_ctr;
+                BS_w_ptr <= (BS_w_ptr + 1) % 4;
+            end else if (ex_branch_result.prediction != ex_branch_result.outcome) begin
+                rmt <= Branch_Stack[BS_r_ptr];
+                busy_table <= Branch_Stack[BS_r_ptr].busy_table_backup;
+                mispredict_diff <= instr_ctr - Branch_Stack[BS_r_ptr].ctr;
+                //How do I use the recovery address?
+                instr_ctr <= Branch_Stack[BS_r_ptr].ctr;
+                branch_stack_recovery <= Branch_Stack[BS_r_ptr].alt_addr;
+
+                BS_r_ptr <= (BS_r_ptr + 1) % 4;
+                BS_w_ptr <= (BS_r_ptr + 1) % 4;
+
+
+            end
+        end
+    end
+
+    //^^ make that a circ fifo
+
 
 
     /*
