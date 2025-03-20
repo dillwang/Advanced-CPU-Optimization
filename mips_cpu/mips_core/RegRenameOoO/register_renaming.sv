@@ -6,7 +6,6 @@
 //Change of plans, no more OoO for now, just RegRename, which means no separate stages needed
 
 `include "mips_core.svh"
-`include "mips_core_pkg.sv"
 
 /*
 interface decoder_output_ifc ();

@@ -49,9 +49,7 @@ module branch_controller (
 
     .i_fb_valid      (ex_branch_result.valid),
     .i_fb_pc         (ex_pc.pc),
-    .i_fb_outcome    (ex_branch_result.outcome),
-    .i_fb_prediction (ex_branch_result.prediction),
-    .i_req_target(dec_branch_decoded.target)
+    .i_fb_outcome    (ex_branch_result.outcome)
 );
 
 
