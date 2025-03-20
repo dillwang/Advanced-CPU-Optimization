@@ -42,11 +42,12 @@ module hazard_controller (
     hazard_control_ifc.out d2e_hc,
     hazard_control_ifc.out e2m_hc,
     hazard_control_ifc.out m2w_hc,
+    hazard_control_ifc.out rr_hc,
 
     // Load pc output
-    load_pc_ifc.out load_pc,
+    load_pc_ifc.out load_pc
 
-    input logic [`ADDR_WIDTH - 1 : 0] branch_stack_recovery
+    //input logic [`ADDR_WIDTH - 1 : 0] branch_stack_recovery
 );
 
     branch_controller BRANCH_CONTROLLER (
@@ -146,7 +147,7 @@ module hazard_controller (
 
         if (ex_stall)
             dec_stall = 1'b1;
-    end
+        end
 
     always_comb
     begin : handle_ex
@@ -173,6 +174,9 @@ module hazard_controller (
         e2m_hc.stall = mem_stall;
         m2w_hc.flush = mem_flush;
         m2w_hc.stall = 1'b0;
+
+        rr_hc.stall = lw_hazard | ex_overload;
+        rr_hc.flush = ex_overload;
     end
 
     // Derive the load_pc

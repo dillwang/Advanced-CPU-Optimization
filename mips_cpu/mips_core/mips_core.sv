@@ -69,6 +69,9 @@ module mips_core (
 	alu_input_ifc dec_alu_input();
 	alu_pass_through_ifc dec_alu_pass_through();
 
+	reg_ren_ifc reg_ren_signal();
+	logic commit_rw;
+
 	// ==== DEC to EX
 	pc_ifc d2e_pc();
 	alu_input_ifc d2e_alu_input();
@@ -100,6 +103,7 @@ module mips_core (
 	hazard_control_ifc d2e_hc();
 	hazard_control_ifc e2m_hc();
 	hazard_control_ifc m2w_hc();
+	hazard_control_ifc rr_hc();
 	load_pc_ifc load_pc();
 
 	// xxxx Memory
@@ -169,18 +173,36 @@ module mips_core (
 		.out(dec_decoder_output)
 	);
 
+	register_renaming REGREN(
+		.clk, .rts_n,
+		.decode_in(dec_decoder_output),
+		.i_hc(rr_hc), //idk if this works
+		.out(reg_ren_signal),
+		.in(reg_ren_signal),
+		.bdc(dec_branch_decoded),
+		.ex_branch_result,
+		.commit_rw
+	);
+
 	reg_file REG_FILE(
 		.clk,
 
 		.i_decoded(dec_decoder_output),
 		.i_wb(m2w_write_back), // WB stage
 
-		.out(dec_reg_file_output)
+		.out(dec_reg_file_output),
+
+		.i_reg_ren(reg_ren_signal),
+		.o_reg_ren(reg_ren_signal),
+		.commit_rw
 	);
 
 	forward_unit FORWARD_UNIT(
 		.decoded     (dec_decoder_output),
 		.reg_data    (dec_reg_file_output),
+
+		.rr_ifc(reg_ren_signal),
+		.rr_wb(reg_ren_signal),
 
 		.ex_ctl      (d2e_alu_pass_through),
 		.ex_data     (ex_alu_output),
@@ -194,6 +216,8 @@ module mips_core (
 	decode_stage_glue DEC_STAGE_GLUE(
 		.i_decoded          (dec_decoder_output),
 		.i_reg_data         (dec_forward_unit_output),
+
+		.i_reg_ren(reg_ren_signal),
 
 		.branch_decoded     (dec_branch_decoded),
 

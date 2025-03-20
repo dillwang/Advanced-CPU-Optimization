@@ -3,49 +3,13 @@ module circ_fifo #(parameter int WIDTH = 6, parameter int DEPTH = 64)(
     input w_en, r_en,
     input revert,
     input logic rev_size,
-    input logic [WIDTH-1:0] dat_in,
-    output logic [WIDTH-1:0] dat_out
+    input mips_core_pkg::MipsReg dat_in,
+    output mips_core_pkg::MipsReg dat_out
 );
 
 
 reg [$clog2(DEPTH)-1 : 0] w_ptr, r_ptr;
-reg [WIDTH-1:0] fifo[DEPTH];
-
-/*
-//Reset values
-always@(posedge clk) begin
-    if(~rst_n) begin
-        w_ptr <=0;
-        r_ptr <= 0;
-        dat_out <= 0;
-    end
-end
-
-//write data to fifo
-always@(posedge clk) begin
-    if(w_en) begin
-        fifo[w_ptr] <= dat_in;
-        w_ptr <= (w_ptr + 1) % DEPTH;
-    end
-end
-
-
-//read data from fifo
-
-always@(posedge clk) begin
-    if(r_en) begin
-        dat_out <= fifo[r_ptr];
-        r_ptr <= (r_ptr + 1) % DEPTH;
-    end
-end
-
-always@(posedge clk) begin
-    if(revert) begin
-        r_ptr <= abs(r_ptr - rev_size) % DEPTH;
-    end
-end
-
-*/
+mips_core_pkg::MipsReg fifo[DEPTH];
 
 always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -59,9 +23,10 @@ always_ff @(posedge clk or negedge rst_n) begin
             w_ptr <= (w_ptr + 1) % DEPTH;
         end
         // Revert logic takes priority over read.
-        if (revert) begin
+        else if (revert) begin
             r_ptr <= abs(r_ptr - rev_size) % DEPTH;
-        end else if (r_en) begin
+        end
+        else if (r_en) begin
             dat_out <= fifo[r_ptr];
             r_ptr <= (r_ptr + 1) % DEPTH;
         end

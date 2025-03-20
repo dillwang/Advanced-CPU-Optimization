@@ -70,7 +70,7 @@ endinterface
 
 
 interface reg_ren_ifc();
-Instr_Queue_Entry_t next_instr; //next instruction
+    Instr_Queue_Entry_t next_instr; //next instruction
     logic instr_wr; //allow the instruction to be written into the instruction queue
     logic busy_bits [5:0];
 
@@ -82,35 +82,40 @@ endinterface
 //how do I pass the decoder outputs that I need(uses_rt, etc) through?
 
 module register_renaming (
-    //need input from hazard controller to revert pointers and adjust busy bit table
     input clk, rst_n,
     decoder_output_ifc.in decode_in,
     hazard_control_ifc.in i_hc,
     reg_ren_ifc.out out,   //Handle with HC stall logic
     reg_ren_ifc.in in,
-    branch_decoded_ifc.in bdc,
+    branch_decoded_ifc.hazard bdc,
     branch_result_ifc.in ex_branch_result,
-    output logic [`ADDR_WIDTH - 1 : 0] branch_stack_recovery
+   // output logic [`ADDR_WIDTH - 1 : 0] branch_stack_recovery,
+    input logic commit_rw
 );
-
-//TODO: Branch stack for recovery
 
     //Register Renaming stuff
     parameter int NUM_ARCH_REGS = 32;
     parameter int NUM_PHYS_REGS = 64;
     parameter int INSTR_QUEUE_SIZE = 16;
 
-    logic [5:0] rw_phys;
+    mips_core_pkg::MipsReg rw_phys;
 
-    logic [5:0] fl_in;
-    logic [5:0] fl_out;
+    mips_core_pkg::MipsReg fl_in;
+    mips_core_pkg::MipsReg fl_out;
     logic fl_w_en;
     logic fl_r_en;
     logic fl_rev;
     logic fl_rev_size;
 
-    logic [5:0] al_in;
-    logic [5:0] al_out;
+    mips_core_pkg::MipsReg al_in;
+    mips_core_pkg::MipsReg al_out;
+    logic al_w_en;
+    logic al_r_en;
+    logic al_rev;
+    logic al_rev_size;
+
+    mips_core_pkg::MipsReg arch_al_in;
+    mips_core_pkg::MipsReg arch_al_out;
     logic al_w_en;
     logic al_r_en;
     logic al_rev;
@@ -118,22 +123,7 @@ module register_renaming (
 
     logic [31:0] instr_ctr;
 
-    logic [5:0] rmt [NUM_ARCH_REGS];
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (~rst_n) begin //reset logic
-            for (int i = 0; i < NUM_ARCH_REGS; i++) begin
-                rmt[i] = i;
-            end
-        end
-        else if (i_hc.flush) begin
-            // Restore RMT from backup USE BRANCH STACK
-
-        end else if (decode_in.valid & decode_in.uses_rw) begin
-            // Update RMT
-            rmt[decode_in.rw_addr] <= rw_phys;
-        end
-    end
+    mips_core_pkg::MipsReg rmt [5:0];
 
     circ_fifo free_list(
         .clk(clk),
@@ -146,16 +136,6 @@ module register_renaming (
         .dat_out(fl_out)
         );
 
-    always_ff @(posedge clk or negedge rst_n) begin
-        if(~rst_n) begin
-            for(int i = 0; i < 64; i++) begin
-                fl_w_en = 1;
-                fl_in = i;
-            end
-            fl_w_en <= 0;
-        end
-    end
-
     circ_fifo #(6, 32) active_list(
         .clk(clk),
         .rst_n(rst_n),
@@ -167,21 +147,65 @@ module register_renaming (
         .dat_out(al_out)
         );
 
-        always_ff @(posedge clk or negedge rst_n) begin
-            if(~rst_n) begin
-                for(int i = 0; i < 64; i++) begin
-                    al_w_en = 1;
-                    al_in = i;
-                end
-                al_w_en <= 0;
+    circ_fifo #(6, 32) arch_active_list(
+        .clk(clk),
+        .rst_n(rst_n),
+        .w_en(al_w_en),
+        .r_en(al_r_en),
+        .revert(al_rev),
+        .rev_size(al_rev_size),
+        .dat_in(arch_al_in),
+        .dat_out(arch_al_out)
+        );
+
+    //reset logic
+    always_ff @(posedge clk or negedge rst_n) begin
+        if(~rst_n) begin
+            //reset free list
+            for(int i = 0; i < 32; i++) begin
+                fl_w_en <= 1;    //does this cause a race condition for the enable and actual write?
+                fl_in <= i + 32;
+            end
+            fl_w_en <= 0;
+            //reset active list
+            for(int i = 0; i < 32; i++) begin
+                al_w_en <= 1;
+                al_in <= i;
+                arch_al_in <= i;
+            end
+            al_w_en <= 0
+            //reset register map table
+            for (int i = 0; i < NUM_ARCH_REGS; i++) begin
+                rmt[i] = i;
+            end
+            //reset instr ctr
+            instr_ctr <= 0;
+            //Branch Stack reset
+            BS_w_ptr   <= 0;
+            BS_r_ptr   <= 0;
+            Branch_Stack.rmt_backup <= '{default: 0};
+            Branch_Stack.busy_table_backup <= '{default: 0};
+            Branch_Stack.alt_addr <= '{default: 0};
+            Branch_Stack.ctr <= '{default: 0};
+        end
+    end
+
+    //combinational reset logic
+    always_comb begin
+        if(~rst_n) begin
+            //reset busy bits
+            for (int i = 0; i < NUM_PHYS_REGS; i++) begin
+                out.busy_bits[i] = 0;
             end
         end
+    end
 
+    //Instruction Queue Entry
     typedef struct {
         mips_core_pkg::AluCtl instruction; //alu_ctl
-        logic [5:0] rw_phys;
-        logic [5:0] rt_phys;
-        logic [5:0] rs_phys;
+        mips_core_pkg::MipsReg rw_phys;
+        mips_core_pkg::MipsReg rt_phys;
+        mips_core_pkg::MipsReg rs_phys;
         logic valid; //same as alu?
         logic ready;
         logic is_branch_jump;
@@ -201,41 +225,39 @@ module register_renaming (
     //instr q: Squash: set Writeback bit to 0
     //clear instr queue and clear busy bit?
 
-    always_ff @(posedge clk or negedge rst_n) begin
-        if(~rst_n) begin
-                instr_head <= 0;
-                instr_ctr <= 0;
-        end
-        else begin
-            if (decode_in.valid & decode_in.uses_rw) begin
-            //fetch new phys reg from free list
+    //actual register renaming
+    always_ff @(posedge clk) begin
+        if(rst_n && !i_hc.stall) begin
+            if (decode_in.valid && decode_in.uses_rw) begin
 
-            //TODO: how do I separate the non-alu instructions to not do all this
-            fl_r_en <= 1;
-            rw_phys <= fl_out;
+                // Save old mapping in active list
+                al_w_en <= 1;
+                arch_al_in <= decode_in.rw_addr;
+                al_in <= rmt[decode_in.rw_addr];
+
+                //fetch new phys reg from free list
+                fl_r_en <= 1;
+                rw_phys <= fl_out;
+                rmt[decode_in.rw_addr] <= fl_out;
 
 
-            // Save old mapping in active list
-            al_w_en <= 1;
-            al_in <= rmt[decode_in.rw_addr];
+                //TODO: for writeback: use iw pointer
+                //when decoding, the decode might have r2 + r3 => r1, but the writeback pointer will
+                //want r4, so you cant use the decode pointer
 
-            //TODO: for writeback: use iw pointer
-            //when decoding, the decode might have r2 + r3 => r1, but the writeback pointer will
-            //want r4, so you cant use the decode pointer
+                //update rmt with new mapping
 
-            //update rmt with new mapping
-            rmt[decode_in.rw_addr] <= rw_phys;
-            out.next_instr.rw_phys <= rmt[decode_in.rw_addr];
+                out.next_instr.rw_phys <= rmt[decode_in.rw_addr];
 
-            //TODO: NEED TO ADD LOGIC FOR CHECKING IF REGISTER IS IN USE:
-            //I do this in scheeduling stage/instr queue
-            //How to do this async? but set sync?
+                //TODO: NEED TO ADD LOGIC FOR CHECKING IF REGISTER IS IN USE:
+                //I do this in scheeduling stage/instr queue
+                //How to do this async? but set sync?
 
             end
             out.next_instr.instruction <= decode_in.alu_ctl;
+
             //TODO: do I need to move this into the if statement?
             //I need to review this
-
             out.next_instr.rs_phys <= rmt[decode_in.rs_addr];
             out.next_instr.rt_phys <= rmt[decode_in.rt_addr];
             //are operands ready?
@@ -253,14 +275,15 @@ module register_renaming (
             out.next_instr.uses_rt <= decode_in.uses_rt;
             out.next_instr.uses_rw <= decode_in.uses_rw;
             out.next_instr.uses_immediate <= decode_in.uses_immediate;
+            out.next_instr.immediate <= decode_in.immediate;
             out.instr_wr <= 1;
             //instr tagged with counter
             out.next_instr.count <= instr_ctr;
+            fl_r_en <= 0;
+            al_w_en <= 0;
+            out.instr_wr <= 0;
+            instr_ctr <= instr_ctr + 1;
         end
-        fl_r_en <= 0;
-        al_w_en <= 0;
-        out.instr_wr <= 0;
-        instr_ctr <= instr_ctr + 1;
     end
 
     //BUSY BIT TABLE
@@ -270,25 +293,15 @@ module register_renaming (
     //TODO: commit
 
     //reg is busy if bit is high
-    //make bit high when moving to active list(?)
-    //TODO: needs to be checked asynchronously but set synchronously
+    //busy bit logic
     always_comb begin
-        if(!rst_n) begin
-            for (int i = 0; i < 64; i++) begin
-                out.busy_bits[i] = 0;
-            end
-        end
-        else begin
-            for (int i = 0; i < 64; i++) begin
-                out.busy_bits[i] = out.busy_bits[i];
-            end
+        if(rst_n) begin
+            //keep them the same, idk if this is necessary
+            //for (int i = 0; i < NUM_PHYS_REGS; i++) begin
+            //    out.busy_bits[i] = out.busy_bits[i];
+            //end
             if(decode_in.valid && decode_in.uses_rw) begin
                 out.busy_bits[rw_phys] = 1;   //set busy bit to high when removed from free list
-            end
-            else if(i_hc.flush || ex_branch_result.prediction != ex_branch_result.outcome) begin
-                for(int i = 0; i < 64; i++) begin
-                    busy_bits[i] = Branch_Stack[BS_r_ptr].busy_table_backup[i];
-                end
             end
         end
     end
@@ -301,14 +314,15 @@ module register_renaming (
             al_rev <= 1;
             fl_rev_size <= mispredict_diff;
             fl_rev <= 1;
-            
         end
         al_rev <= 0;
         fl_rev <= 0;
+        //does this cause issues
     end
 
+    //Branch Stack Entry
     typedef struct {
-        logic [5:0] rmt_backup [NUM_ARCH_REGS];
+        mips_core_pkg::MipsReg rmt_backup [5:0];
         logic busy_table_backup [5:0];
         logic [`ADDR_WIDTH - 1 : 0] alt_addr;
         logic [31:0] ctr;
@@ -316,45 +330,51 @@ module register_renaming (
 
     logic [31:0] mispredict_diff;
 
-    Branch_Stack_Entry_t Branch_Stack [4];
+    Branch_Stack_Entry_t Branch_Stack [1:0];
     logic [1:0] BS_w_ptr;
     logic [1:0] BS_r_ptr;
 
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            BS_w_ptr   <= 0;
-            BS_r_ptr   <= 0;
-            Branch_Stack.rmt_backup <= '{default: 0};
-            Branch_Stack.busy_table_backup <= '{default: 0};
-            Branch_Stack.alt_addr <= '{default: 0};
-            Branch_Stack.ctr <= '{default: 0};
-        end else begin
-            // Write logic
+    always_ff @(posedge clk) begin
+        if (rst_n) begin
+            //Branch Stack logic
             if (decode_in.is_branch ) begin
                 Branch_Stack[BS_w_ptr].alt_addr <= bdc.recovery_target;
-                Branch_Stack[BS_w_ptr].busy_table_backup <= out.busy_bits;
+                Branch_Stack[BS_w_ptr].busy_table_backup <= in.busy_bits;
                 Branch_Stack[BS_w_ptr].rmt_backup <= rmt;
                 Branch_Stack[BS_w_ptr].ctr <= instr_ctr;
-                BS_w_ptr <= (BS_w_ptr + 1) % 4;
-            end else if (ex_branch_result.prediction != ex_branch_result.outcome) begin
+                BS_w_ptr <= (BS_w_ptr + 1);
+            end else if (ex_branch_result.valid
+            & (ex_branch_result.prediction != ex_branch_result.outcome)) begin
                 rmt <= Branch_Stack[BS_r_ptr].rmt_backup;
                 mispredict_diff <= instr_ctr - Branch_Stack[BS_r_ptr].ctr;
                 //instr_ctr <= Branch_Stack[BS_r_ptr].ctr;
                 //i am avoiding the race condition entirely by not resetting the instruction counter
                 branch_stack_recovery <= Branch_Stack[BS_r_ptr].alt_addr;
-
-                BS_r_ptr <= (BS_r_ptr + 1) % 4;
-                BS_w_ptr <= (BS_r_ptr + 1) % 4;
-
-
+                BS_w_ptr <= BS_r_ptr;
+                //revert busy bits
+                for(int i = 0; i < NUM_PHYS_REGS; i++) begin
+                    out.busy_bits[i] = Branch_Stack[BS_r_ptr].busy_table_backup[i];
+                end
+            end else if(ex_branch_result.valid
+            & (ex_branch_result.prediction == ex_branch_result.outcome)) begin
+                BS_r_ptr <= (BS_r_ptr + 1);
             end
         end
     end
 
 
-    //^^ make that a circ fifo
-
-
+    //graduation
+    always_ff @(posedge clk) begin
+        if(!i_hc.flush) begin
+            if(commit_rw) begin
+                al_r_en <= 1;
+                fl_w_en <= 1;
+                fl_in <= al_out; // Move old physical register back to free list
+            end
+            al_r_en <= 0;
+            fl_w_en <= 0;
+        end
+    end
 
     /*
         TODO: WB and Commit:

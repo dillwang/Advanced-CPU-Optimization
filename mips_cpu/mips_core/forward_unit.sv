@@ -37,10 +37,10 @@ module forward_unit (
 
 	task check_forward_rs;
 		input logic uses_rs;
-		input logic [5:0] rs_addr;
+		input mips_core_pkg::MipsReg rs_addr;
 
 		input logic condition;
-		input logic [5:0] r_source;
+		input mips_core_pkg::MipsReg r_source;
 		input logic [`DATA_WIDTH - 1 : 0] d_source;
 		begin
 			if (uses_rs && (rs_addr == r_source) && condition) begin
@@ -55,7 +55,7 @@ module forward_unit (
 		input logic [5:0] rt_addr;
 
 		input logic condition;
-		input logic [5:0] r_source;
+		input mips_core_pkg::MipsReg r_source;
 		input logic [`DATA_WIDTH - 1 : 0] d_source;
 		begin
 			if (uses_rt && (rt_addr == r_source) && condition) begin
@@ -68,11 +68,11 @@ module forward_unit (
 	task check_forward;
 		input logic uses_rs;
 		input logic uses_rt;
-		input logic [5:0] rs_addr;
-		input logic [5:0] rt_addr;
+		input mips_core_pkg::MipsReg rs_addr;
+		input mips_core_pkg::MipsReg rt_addr;
 
 		input logic condition;
-		input logic [5:0] r_source;
+		input mips_core_pkg::MipsReg r_source;
 		input logic [`DATA_WIDTH - 1 : 0] d_source;
 		begin
 			check_forward_rs(uses_rs, rs_addr, condition, r_source, d_source);
@@ -107,7 +107,8 @@ module forward_unit (
 		o_lw_hazard = ex_data.valid & ex_ctl.uses_rw & ex_ctl.is_mem_access
 			& ((rr_ifc.uses_rs & (rr_ifc.rs_phys == ex_ctl.rw_addr))
 				| (rr_ifc.uses_rt & (rr_ifc.rt_phys == ex_ctl.rw_addr))
-				| rr_ifc.busy_bits[rt_addr] | rr_ifc.busy_bits[rs_addr]); //should these be addr or phys?
+				| rr_ifc.busy_bits[rr_ifc.rt_phys] | rr_ifc.busy_bits[rr_ifc.rs_phys]);
+				// or phys?
 				//added last two ors, should check if either is busy
 	end
 
