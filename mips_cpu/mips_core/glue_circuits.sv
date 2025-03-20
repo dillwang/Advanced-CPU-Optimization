@@ -9,7 +9,6 @@
  * controller.
  */
 `include "mips_core.svh"
-`include "mips_core/RegRenameOoO/register_renaming.sv"
 
 module decode_stage_glue (
 	decoder_output_ifc.in i_decoded,
@@ -29,7 +28,7 @@ module decode_stage_glue (
 	begin
 		o_alu_input.valid =   i_reg_ren.next_instr.valid;
 		o_alu_input.alu_ctl = i_reg_ren.next_instr.instruction;
-		o_alu_input.op1 =     i_reg_data_instr.rs_data;
+		o_alu_input.op1 =     i_reg_data.rs_data;
 		o_alu_input.op2 =     i_reg_ren.next_instr.uses_immediate
 			? i_reg_ren.next_instr.immediate
 			: i_reg_data.rt_data;

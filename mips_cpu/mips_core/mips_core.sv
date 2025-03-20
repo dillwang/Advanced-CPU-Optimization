@@ -175,7 +175,7 @@ module mips_core (
 	);
 
 	register_renaming REGREN(
-		.clk, .rts_n,
+		.clk, .rst_n,
 		.decode_in(dec_decoder_output),
 		.i_hc(rr_hc), //idk if this works
 		.out(reg_ren_signal),

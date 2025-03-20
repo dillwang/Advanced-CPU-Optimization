@@ -12,7 +12,6 @@
  * See wiki page "Branch and Jump" for details.
  */
 `include "mips_core.svh"
-`include "mips_core/RegRenameOoO/register_renaming.sv"
 
 interface reg_file_output_ifc ();
 	logic [`DATA_WIDTH - 1 : 0] rs_data;

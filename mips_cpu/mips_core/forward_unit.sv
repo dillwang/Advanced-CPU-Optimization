@@ -12,7 +12,6 @@
  * this unit caused by using tasks incorrectly (due to sensitivity list)
  */
 `include "mips_core.svh"
-`include "mips_core/RegRenameOoO/register_renaming.sv"
 
 module forward_unit (
 	// Input from decoder
@@ -87,18 +86,18 @@ module forward_unit (
 		out.rt_data = reg_data.rt_data;
 
 		// Forward WB stage
-		check_forward(rr_ifc.uses_rs, rr_ifc.uses_rt,
-			rr_ifc.rs_phys, rr_ifc.rt_phys,
+		check_forward(rr_ifc.next_instr.uses_rs, rr_ifc.next_instr.uses_rt,
+			rr_ifc.next_instr.rs_phys, rr_ifc.next_instr.rt_phys,
 			wb.uses_rw, wb.rw_addr, wb.rw_data);
 
 		// Forward MEM stage
-		check_forward(rr_ifc.uses_rs, rr_ifc.uses_rt,
-			rr_ifc.rs_phys, rr_ifc.rt_phys,
+		check_forward(rr_ifc.next_instr.uses_rs, rr_ifc.next_instr.uses_rt,
+			rr_ifc.next_instr.rs_phys, rr_ifc.next_instr.rt_phys,
 			mem.uses_rw, mem.rw_addr, mem.rw_data);
 
 		// Forward EX stage
-		check_forward(rr_ifc.uses_rs, rr_ifc.uses_rt,
-			rr_ifc.rs_phys, rr_ifc.rt_phys,
+		check_forward(rr_ifc.next_instr.uses_rs, rr_ifc.next_instr.uses_rt,
+			rr_ifc.next_instr.rs_phys, rr_ifc.next_instr.rt_phys,
 			ex_data.valid & ex_ctl.uses_rw & ~ex_ctl.is_mem_access,
 			ex_ctl.rw_addr, ex_data.result);
 	end
@@ -106,9 +105,9 @@ module forward_unit (
 	always_comb
 	begin
 		o_lw_hazard = ex_data.valid & ex_ctl.uses_rw & ex_ctl.is_mem_access
-			& ((rr_ifc.uses_rs & (rr_ifc.rs_phys == ex_ctl.rw_addr))
-				| (rr_ifc.uses_rt & (rr_ifc.rt_phys == ex_ctl.rw_addr))
-				| rr_ifc.busy_bits[rr_ifc.rt_phys] | rr_ifc.busy_bits[rr_ifc.rs_phys]);
+			& ((rr_ifc.next_instr.uses_rs & (rr_ifc.next_instr.rs_phys == ex_ctl.rw_addr))
+				| (rr_ifc.next_instr.uses_rt & (rr_ifc.next_instr.rt_phys == ex_ctl.rw_addr))
+				| rr_ifc.busy_bits[rr_ifc.next_instr.rt_phys] | rr_ifc.busy_bits[rr_ifc.next_instr.rs_phys]);
 				// or phys?
 				//added last two ors, should check if either is busy
 	end

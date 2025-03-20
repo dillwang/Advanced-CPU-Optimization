@@ -116,10 +116,6 @@ module register_renaming (
 
     mips_core_pkg::MipsReg arch_al_in;
     mips_core_pkg::MipsReg arch_al_out;
-    logic al_w_en;
-    logic al_r_en;
-    logic al_rev;
-    logic al_rev_size;
 
     logic [31:0] instr_ctr;
 
