@@ -99,28 +99,28 @@ module register_renaming (
     parameter int NUM_PHYS_REGS = 64;
     parameter int INSTR_QUEUE_SIZE = 16;
 
-    mips_core_pkg::MipsReg rw_phys;
+    logic [5:0] rw_phys;
 
-    mips_core_pkg::MipsReg fl_in;
-    mips_core_pkg::MipsReg fl_out;
+    logic [5:0] fl_in;
+    logic [5:0] fl_out;
     logic fl_w_en;
     logic fl_r_en;
     logic fl_rev;
     logic fl_rev_size;
 
-    mips_core_pkg::MipsReg al_in;
-    mips_core_pkg::MipsReg al_out;
+    logic [5:0] al_in;
+    logic [5:0] al_out;
     logic al_w_en;
     logic al_r_en;
     logic al_rev;
     logic al_rev_size;
 
-    mips_core_pkg::MipsReg arch_al_in;
-    mips_core_pkg::MipsReg arch_al_out;
+    logic [5:0] arch_al_in;
+    logic [5:0] arch_al_out;
 
     logic [31:0] instr_ctr;
 
-    mips_core_pkg::MipsReg rmt [64];
+    logic [5:0] rmt [64];
 
     circ_fifo free_list(
         .clk(clk),
@@ -159,20 +159,20 @@ module register_renaming (
     always_ff @(posedge clk or negedge rst_n) begin
         if(~rst_n) begin
             //reset free list
-            for(mips_core_pkg::MipsReg i = 0; i < 32; i++) begin
+            for(int i = 0; i < 32; i++) begin
                 fl_w_en <= 1;    //does this cause a race condition for the enable and actual write?
                 fl_in <= i + 32;
             end
             fl_w_en <= 0;
             //reset active list
-            for(mips_core_pkg::MipsReg i = 0; i < 32; i++) begin
+            for(int i = 0; i < 32; i++) begin
                 al_w_en <= 1;
                 al_in <= i;
                 arch_al_in <= i;
             end
             al_w_en <= 0;
             //reset register map table
-            for (mips_core_pkg::MipsReg i = 0; i < NUM_ARCH_REGS; i++) begin
+            for (int i = 0; i < NUM_ARCH_REGS; i++) begin
                 rmt[i] = i;
             end
             //reset instr ctr
@@ -299,7 +299,7 @@ module register_renaming (
 
     //Branch Stack Entry
     typedef struct {
-        mips_core_pkg::MipsReg rmt_backup [5:0];
+        logic[5:0] rmt_backup [5:0];
         logic busy_table_backup [5:0];
         logic [`ADDR_WIDTH - 1 : 0] alt_addr;
         logic [31:0] ctr;
