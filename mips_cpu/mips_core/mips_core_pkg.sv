@@ -99,7 +99,7 @@ typedef struct {
 	logic is_branch_jump;
 	logic is_jump;
 	logic is_jump_reg;
-	logic [`ADDR_WIDTH - 1 : 0] branch_target;
+	logic [26 - 1 : 0] branch_target;
 	logic is_mem_access;
 	mips_core_pkg::MemAccessType mem_action;
 	logic uses_rs;
