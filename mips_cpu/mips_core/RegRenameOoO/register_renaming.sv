@@ -159,21 +159,21 @@ module register_renaming (
     always_ff @(posedge clk or negedge rst_n) begin
         if(~rst_n) begin
             //reset free list
-            for(int i = 0; i < 32; i++) begin
+            for(mips_core_pkg::MipsReg i = 0; i < 32; i++) begin
                 fl_w_en <= 1;    //does this cause a race condition for the enable and actual write?
-                fl_in <= mips_core_pkg::MipsReg'{i + 32};
+                fl_in <= i + 32;
             end
             fl_w_en <= 0;
             //reset active list
-            for(int i = 0; i < 32; i++) begin
+            for(mips_core_pkg::MipsReg i = 0; i < 32; i++) begin
                 al_w_en <= 1;
-                al_in <= mips_core_pkg::MipsReg'{i};
-                arch_al_in <= mips_core_pkg::MipsReg'{i};
+                al_in <= i;
+                arch_al_in <= i;
             end
             al_w_en <= 0;
             //reset register map table
-            for (int i = 0; i < NUM_ARCH_REGS; i++) begin
-                rmt[i] = mips_core_pkg::MipsReg'{i};
+            for (mips_core_pkg::MipsReg i = 0; i < NUM_ARCH_REGS; i++) begin
+                rmt[i] = i;
             end
             //reset instr ctr
             instr_ctr <= 0;
