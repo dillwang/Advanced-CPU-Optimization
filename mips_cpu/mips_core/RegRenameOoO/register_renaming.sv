@@ -6,6 +6,7 @@
 //Change of plans, no more OoO for now, just RegRename, which means no separate stages needed
 
 `include "mips_core.svh"
+`include "mips_core/RegRenameOoO/circ_fifo.sv"
 
 /*
 interface decoder_output_ifc ();
@@ -119,7 +120,7 @@ module register_renaming (
 
     logic [31:0] instr_ctr;
 
-    mips_core_pkg::MipsReg rmt [5:0];
+    mips_core_pkg::MipsReg rmt [64];
 
     circ_fifo free_list(
         .clk(clk),
@@ -160,29 +161,31 @@ module register_renaming (
             //reset free list
             for(int i = 0; i < 32; i++) begin
                 fl_w_en <= 1;    //does this cause a race condition for the enable and actual write?
-                fl_in <= i + 32;
+                fl_in <= mips_core_pkg::MipsReg'{i + 32};
             end
             fl_w_en <= 0;
             //reset active list
             for(int i = 0; i < 32; i++) begin
                 al_w_en <= 1;
-                al_in <= i;
-                arch_al_in <= i;
+                al_in <= mips_core_pkg::MipsReg'{i};
+                arch_al_in <= mips_core_pkg::MipsReg'{i};
             end
             al_w_en <= 0;
             //reset register map table
             for (int i = 0; i < NUM_ARCH_REGS; i++) begin
-                rmt[i] = i;
+                rmt[i] = mips_core_pkg::MipsReg'{i};
             end
             //reset instr ctr
             instr_ctr <= 0;
             //Branch Stack reset
             BS_w_ptr   <= 0;
             BS_r_ptr   <= 0;
-            Branch_Stack.rmt_backup <= '{default: 0};
-            Branch_Stack.busy_table_backup <= '{default: 0};
-            Branch_Stack.alt_addr <= '{default: 0};
-            Branch_Stack.ctr <= '{default: 0};
+            for(int i = 0; i < 4; i++) begin
+                Branch_Stack.[i]rmt_backup <= '{default: 0};
+                Branch_Stack.[i]busy_table_backup <= '{default: 0};
+                Branch_Stack.[i]alt_addr <= '{default: 0};
+                Branch_Stack.[i]ctr <= '{default: 0};
+            end
         end
     end
 
@@ -304,7 +307,7 @@ module register_renaming (
 
     logic [31:0] mispredict_diff;
 
-    Branch_Stack_Entry_t Branch_Stack [1:0];
+    Branch_Stack_Entry_t Branch_Stack [4];
     logic [1:0] BS_w_ptr;
     logic [1:0] BS_r_ptr;
 
