@@ -11,6 +11,7 @@
  * See wiki page "Synchronous Caches" for details.
  */
 `include "mips_core.svh"
+`include "register_renaming.sv"
 
 module pr_i2d (
 	input clk,    // Clock

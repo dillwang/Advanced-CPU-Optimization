@@ -8,6 +8,7 @@
 * All addresses used in this scope are byte addresses (26-bit)
 */
 `include "mips_core.svh"
+`include "register_renaming.sv"
 
 `ifdef SIMULATION
 import "DPI-C" function void pc_event (input int pc);
@@ -337,6 +338,7 @@ module mips_core (
 		.d2e_hc,
 		.e2m_hc,
 		.m2w_hc,
+		.rr_hc,
 		.load_pc
 	);
 

@@ -9,6 +9,7 @@
  * controller.
  */
 `include "mips_core.svh"
+`include "register_renaming.sv"
 
 module decode_stage_glue (
 	decoder_output_ifc.in i_decoded,
