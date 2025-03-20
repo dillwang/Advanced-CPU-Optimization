@@ -29,7 +29,7 @@ module reg_file (
 
 	//input from reg rename
 	reg_ren_ifc.in i_reg_ren,
-	reg_ren_ifc.out o_reg_ren
+	reg_ren_ifc.out o_reg_ren,
 
 	// Input from write back stage
 	write_back_ifc.in i_wb,
@@ -37,7 +37,7 @@ module reg_file (
 	// Output data
 	reg_file_output_ifc.out out,
 
-	output logic commit_rw;
+	output logic commit_rw
 
 );
 
