@@ -86,4 +86,26 @@ typedef enum logic {
 	TAKEN
 } BranchOutcome;
 
+ //Instruction Queue Entry
+typedef struct {
+	mips_core_pkg::AluCtl instruction; //alu_ctl
+	mips_core_pkg::MipsReg rw_phys;
+	mips_core_pkg::MipsReg rt_phys;
+	mips_core_pkg::MipsReg rs_phys;
+	logic valid; //same as alu?
+	logic ready;
+	logic is_branch_jump;
+	logic is_jump;
+	logic is_jump_reg;
+	logic [`ADDR_WIDTH - 1 : 0] branch_target;
+	logic is_mem_access;
+	mips_core_pkg::MemAccessType mem_action;
+	logic uses_rs;
+	logic uses_rt;
+	logic uses_immediate;
+	logic [`DATA_WIDTH - 1 : 0] immediate;
+	logic uses_rw;
+	logic [31:0] count;
+} Instr_Queue_Entry_t;
+
 endpackage

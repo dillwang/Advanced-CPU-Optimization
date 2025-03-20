@@ -6,6 +6,7 @@
 //Change of plans, no more OoO for now, just RegRename, which means no separate stages needed
 
 `include "mips_core.svh"
+`include "mips_core_pkg.sv"
 
 /*
 interface decoder_output_ifc ();
@@ -196,28 +197,6 @@ module register_renaming (
         end
     end
 
-    //Instruction Queue Entry
-    typedef struct {
-        mips_core_pkg::AluCtl instruction; //alu_ctl
-        mips_core_pkg::MipsReg rw_phys;
-        mips_core_pkg::MipsReg rt_phys;
-        mips_core_pkg::MipsReg rs_phys;
-        logic valid; //same as alu?
-        logic ready;
-        logic is_branch_jump;
-        logic is_jump;
-        logic is_jump_reg;
-        logic [`ADDR_WIDTH - 1 : 0] branch_target;
-        logic is_mem_access;
-        mips_core_pkg::MemAccessType mem_action;
-        logic uses_rs;
-        logic uses_rt;
-        logic uses_immediate;
-        logic [`DATA_WIDTH - 1 : 0] immediate;
-        logic uses_rw;
-        logic [31:0] count;
-    } Instr_Queue_Entry_t;
-
     //instr q: Squash: set Writeback bit to 0
     //clear instr queue and clear busy bit?
 
@@ -345,7 +324,7 @@ module register_renaming (
                 mispredict_diff <= instr_ctr - Branch_Stack[BS_r_ptr].ctr;
                 //instr_ctr <= Branch_Stack[BS_r_ptr].ctr;
                 //i am avoiding the race condition entirely by not resetting the instruction counter
-                branch_stack_recovery <= Branch_Stack[BS_r_ptr].alt_addr;
+                //branch_stack_recovery <= Branch_Stack[BS_r_ptr].alt_addr;
                 BS_w_ptr <= BS_r_ptr;
                 //revert busy bits
                 for(int i = 0; i < NUM_PHYS_REGS; i++) begin
