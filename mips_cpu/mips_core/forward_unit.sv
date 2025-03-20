@@ -18,6 +18,7 @@ module forward_unit (
 	decoder_output_ifc.in decoded,
 	reg_file_output_ifc.in reg_data,
 	reg_ren_ifc.in rr_ifc,
+	reg_ren_ifc.out rr_wb,
 
 	// Feedback from EX stage
 	alu_pass_through_ifc.in ex_ctl,
@@ -36,38 +37,42 @@ module forward_unit (
 
 	task check_forward_rs;
 		input logic uses_rs;
-		input mips_core_pkg::MipsReg rs_addr;
+		input logic [5:0] rs_addr;
 
 		input logic condition;
-		input mips_core_pkg::MipsReg r_source;
+		input logic [5:0] r_source;
 		input logic [`DATA_WIDTH - 1 : 0] d_source;
 		begin
-			if (uses_rs && (rs_addr == r_source) && condition)
+			if (uses_rs && (rs_addr == r_source) && condition) begin
 				out.rs_data = d_source;
+				rr_wb.busy_bits[rs_addr] = 0;	//this will throw a fit probably
+			end
 		end
 	endtask
 
 	task check_forward_rt;
 		input logic uses_rt;
-		input mips_core_pkg::MipsReg rt_addr;
+		input logic [5:0] rt_addr;
 
 		input logic condition;
-		input mips_core_pkg::MipsReg r_source;
+		input logic [5:0] r_source;
 		input logic [`DATA_WIDTH - 1 : 0] d_source;
 		begin
-			if (uses_rt && (rt_addr == r_source) && condition)
+			if (uses_rt && (rt_addr == r_source) && condition) begin
 				out.rt_data = d_source;
+				rr_wb.busy_bits[rt_addr] = 0;	//this will also probably throw a fit
+			end
 		end
 	endtask
 
 	task check_forward;
 		input logic uses_rs;
 		input logic uses_rt;
-		input mips_core_pkg::MipsReg rs_addr;
-		input mips_core_pkg::MipsReg rt_addr;	//TODO: make these work with 64 regs somehow
+		input logic [5:0] rs_addr;
+		input logic [5:0] rt_addr;
 
 		input logic condition;
-		input mips_core_pkg::MipsReg r_source;
+		input logic [5:0] r_source;
 		input logic [`DATA_WIDTH - 1 : 0] d_source;
 		begin
 			check_forward_rs(uses_rs, rs_addr, condition, r_source, d_source);
@@ -87,7 +92,7 @@ module forward_unit (
 
 		// Forward MEM stage
 		check_forward(rr_ifc.uses_rs, rr_ifc.uses_rt,
-			rr_ifc.rs_ph, rr_ifc.rt_phys,
+			rr_ifc.rs_phys, rr_ifc.rt_phys,
 			mem.uses_rw, mem.rw_addr, mem.rw_data);
 
 		// Forward EX stage
@@ -101,7 +106,9 @@ module forward_unit (
 	begin
 		o_lw_hazard = ex_data.valid & ex_ctl.uses_rw & ex_ctl.is_mem_access
 			& ((rr_ifc.uses_rs & (rr_ifc.rs_phys == ex_ctl.rw_addr))
-				| (rr_ifc.uses_rt & (rr_ifc.rt_phys == ex_ctl.rw_addr)));
+				| (rr_ifc.uses_rt & (rr_ifc.rt_phys == ex_ctl.rw_addr))
+				| rr_ifc.busy_bits[rt_addr] | rr_ifc.busy_bits[rs_addr]); //should these be addr or phys?
+				//added last two ors, should check if either is busy
 	end
 
 endmodule

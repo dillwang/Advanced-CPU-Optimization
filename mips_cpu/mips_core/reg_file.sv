@@ -29,6 +29,7 @@ module reg_file (
 
 	//input from reg rename
 	reg_ren_ifc.in i_reg_ren,
+	reg_ren_ifc.out o_reg_ren
 
 	// Input from write back stage
 	write_back_ifc.in i_wb,
@@ -52,6 +53,7 @@ module reg_file (
 		if(i_wb.uses_rw)
 		begin
 			regs[i_wb.rw_addr] = i_wb.rw_data;
+			o_reg_ren.busy_bits[i_wb.rw_addr] = 0;
 		end
 	end
 
