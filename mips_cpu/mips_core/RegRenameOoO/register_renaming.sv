@@ -181,10 +181,10 @@ module register_renaming (
             BS_w_ptr   <= 0;
             BS_r_ptr   <= 0;
             for(int i = 0; i < 4; i++) begin
-                Branch_Stack.[i].rmt_backup <= '{default: 0};
-                Branch_Stack.[i].busy_table_backup <= '{default: 0};
-                Branch_Stack.[i].alt_addr <= '{default: 0};
-                Branch_Stack.[i].ctr <= '{default: 0};
+                Branch_Stack[i].rmt_backup <= '{default: 0};
+                Branch_Stack[i].busy_table_backup <= '{default: 0};
+                Branch_Stack[i].alt_addr <= '{default: 0};
+                Branch_Stack[i].ctr <= '{default: 0};
             end
         end
     end
