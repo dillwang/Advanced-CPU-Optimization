@@ -9,7 +9,7 @@
  * See wiki page "Systemverilog Primer" section package and enum for details.
  */
 
- `include "mips_core.svh"
+
 package mips_core_pkg;
 
 typedef enum logic [5:0] {
@@ -105,7 +105,7 @@ typedef struct {
 	logic uses_rs;
 	logic uses_rt;
 	logic uses_immediate;
-	logic [`DATA_WIDTH - 1 : 0] immediate;
+	logic [26 - 1 : 0] immediate;
 	logic uses_rw;
 	logic [31:0] count;
 } Instr_Queue_Entry_t;
