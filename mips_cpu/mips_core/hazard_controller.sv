@@ -15,7 +15,7 @@
  * See wiki page "Branch and Jump" for details of branch and jump instructions.
  */
 `include "mips_core.svh"
-`include "register_renaming.sv"
+`include "mips_core/RegRenameOoO/register_renaming.sv"
 
 `ifdef SIMULATION
 import "DPI-C" function void stats_event (input string e);

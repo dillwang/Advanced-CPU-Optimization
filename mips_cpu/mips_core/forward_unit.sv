@@ -12,7 +12,7 @@
  * this unit caused by using tasks incorrectly (due to sensitivity list)
  */
 `include "mips_core.svh"
-`include "register_renaming.sv"
+`include "mips_core/RegRenameOoO/register_renaming.sv"
 
 module forward_unit (
 	// Input from decoder
