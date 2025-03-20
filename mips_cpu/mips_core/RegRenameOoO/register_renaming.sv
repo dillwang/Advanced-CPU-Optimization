@@ -173,7 +173,7 @@ module register_renaming (
                 al_in <= i;
                 arch_al_in <= i;
             end
-            al_w_en <= 0
+            al_w_en <= 0;
             //reset register map table
             for (int i = 0; i < NUM_ARCH_REGS; i++) begin
                 rmt[i] = i;
