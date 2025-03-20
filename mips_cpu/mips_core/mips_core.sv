@@ -188,7 +188,7 @@ module mips_core (
 	reg_file REG_FILE(
 		.clk,
 
-		.i_decoded(dec_decoder_output),
+		//.i_decoded(dec_decoder_output),
 		.i_wb(m2w_write_back), // WB stage
 
 		.out(dec_reg_file_output),

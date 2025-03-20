@@ -312,7 +312,7 @@ module register_renaming (
     always_ff @(posedge clk) begin
         if (rst_n) begin
             //Branch Stack logic
-            if (decode_in.is_branch ) begin
+            if (decode_in.is_branch_jump) begin
                 Branch_Stack[BS_w_ptr].alt_addr <= bdc.recovery_target;
                 Branch_Stack[BS_w_ptr].busy_table_backup <= in.busy_bits;
                 Branch_Stack[BS_w_ptr].rmt_backup <= rmt;
