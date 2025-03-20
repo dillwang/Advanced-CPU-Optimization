@@ -8,6 +8,8 @@
  *
  * See wiki page "Systemverilog Primer" section package and enum for details.
  */
+
+ `include "mips_core.svh"
 package mips_core_pkg;
 
 typedef enum logic [5:0] {
