@@ -16,7 +16,7 @@ module perceptron_predictor (
 );
 
 //parameters
-    parameter int HISTORY_SIZE = 62;
+    parameter int HISTORY_SIZE = 16;
     parameter int PERCEPTRON_NUMBER = 1024;
     parameter int WEIGHT_NUMBER = HISTORY_SIZE + 1;
     parameter int WEIGHT_BITS = 8;
@@ -35,12 +35,21 @@ module perceptron_predictor (
     logic signed [31:0] perceptron_threshold;
     logic [$clog2(PERCEPTRON_NUMBER)-1:0] perceptron_index;
 
-//hash
-    function automatic int hash(input logic [`ADDR_WIDTH-1:0] pc);
-            logic [23:0] pc_bits = pc[25:2];
-            logic [23:0] history_bits = ghr[23:0];
-            return (pc_bits ^ history_bits) % (PERCEPTRON_NUMBER);
-    endfunction
+function automatic int hash(input logic [`ADDR_WIDTH-1:0] pc);
+    logic [23:0] pc_bits;
+    logic [23:0] history_bits;
+
+    if (HISTORY_SIZE >= 24) begin
+        pc_bits = pc[25:2];
+        history_bits = ghr[23:0];
+    end
+    else begin
+        pc_bits = pc[HISTORY_SIZE + 1 : 2];
+        history_bits = ghr[HISTORY_SIZE-1:0];
+    end
+
+    return (pc_bits ^ history_bits) % (PERCEPTRON_NUMBER);
+endfunction
 
 //ghr update
     always_ff @(posedge clk) begin
@@ -51,8 +60,8 @@ module perceptron_predictor (
         end
     end
 
-    always_comb begin
-        ghr_next = {ghr[HISTORY_SIZE-2:0], (i_fb_outcome == TAKEN)};
+    always_ff @(posedge clk) begin
+        ghr_next <= {ghr[HISTORY_SIZE-2:0], (i_fb_outcome == TAKEN)};
     end
 
 //perceptron index
@@ -62,7 +71,7 @@ module perceptron_predictor (
     always_ff @(posedge clk) begin
     if (i_req_valid) begin
         stored_index <= perceptron_index;
-        stored_perceptron_sum <= perceptron_sum;
+        stored_perceptron_sum <= perceptron_sum; //timing issue?
     end
 end
 
@@ -70,12 +79,12 @@ end
     always_comb begin
         perceptron_sum = weights[perceptron_index][0]; //bias term
         for(int i = 1; i < WEIGHT_NUMBER; i++) begin
-            perceptron_sum += ghr[i-1] ?
+            perceptron_sum = perceptron_sum + (ghr[i-1] ?
                 weights[perceptron_index][i] :
-                -weights[perceptron_index][i];
+                -weights[perceptron_index][i]);
         end
     o_req_prediction = (perceptron_sum >= 0) ? TAKEN : NOT_TAKEN;
-    perceptron_threshold = perceptron_sum;
+    perceptron_threshold = stored_perceptron_sum; //check this, there might be a timing issue
     end
 
 //weight update
@@ -99,11 +108,11 @@ end
                 for(int i = 0; i < WEIGHT_NUMBER; i++) begin
                     logic hbit = (i == 0) ? 1'b1 : ghr[i-1];
                     if (i_fb_outcome == TAKEN) begin
-                        weights[perceptron_index][i] <= 
-                            saturate(weights[perceptron_index][i] + (hbit ? 1 : -1));
+                        weights[stored_index][i] <= 
+                            saturate(weights[stored_index][i] + (hbit ? 1 : -1));
                     end else begin
-                        weights[perceptron_index][i] <= 
-                            saturate(weights[perceptron_index][i] + (hbit ? -1 : 1));
+                        weights[stored_index][i] <= 
+                            saturate(weights[stored_index][i] + (hbit ? -1 : 1));
                     end
                 end
             end
