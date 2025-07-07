@@ -60,9 +60,13 @@ We will combine our GShare predictor with our perceptron branch predictor for th
 
 ![image](https://github.com/user-attachments/assets/a88fff39-ef96-4a6d-b27d-6a73976f5192)
 
+![image](https://github.com/user-attachments/assets/949eee24-9657-49f6-9703-cefa054b7aa6)
+
 The Perceptron and the Gshare are both finished. Here is a screenshot of their accuracy:
 
 ![image](https://github.com/user-attachments/assets/af39a6a9-ef4d-49f6-bfc3-80da6c37e6da)
+
+
 
 
 
