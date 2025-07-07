@@ -79,6 +79,10 @@ The Perceptron and the Gshare are both finished. Here is a screenshot of their a
 # Hardware Prefetching
 
 We implemented a next-line Hardware Prefetcher along with a Stream Buffer.
+![image](https://github.com/user-attachments/assets/d619eeec-c238-4fb5-b9d0-15bc34627fa6)
 
+We changed the associativity of the instruction cache and saw a nearly 6 times performance increase over on Nqueens.
+![image](https://github.com/user-attachments/assets/bf1977cb-399c-4fc7-a8e2-8c8aa9d450e8)
 
+We saw a performance improvement of 35%-45% with our next-line prefetcher due to its decently high hit chance.
 
