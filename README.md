@@ -89,12 +89,16 @@ It features an active list, a register map table, a free list, and a busy bit ta
 
 # Out of Order Execution
 
+The out-of-order execution is enabled by register renaming and will explore instruction-level parallelism to provide speedup to the CPU in executing instructions.
+
+Our out-of-order execution features an instruction window of size 64, a register renaming module, a load and store queue, modifications to write back into the map table, as well as a recovery branch stack in case of false branch prediction rollback.
+
 # Hardware Prefetching
 
 We implemented a next-line Hardware Prefetcher along with a Stream Buffer.
 ![image](https://github.com/user-attachments/assets/d619eeec-c238-4fb5-b9d0-15bc34627fa6)
 
-We changed the associativity of the instruction cache and saw a nearly 6 times performance increase over on Nqueens.
+We changed the associativity of the instruction cache and saw a nearly 6 times performance increase on Nqueens.
 ![image](https://github.com/user-attachments/assets/bf1977cb-399c-4fc7-a8e2-8c8aa9d450e8)
 
 We saw a performance improvement of 35%-45% with our next-line prefetcher due to its decently high hit chance.
