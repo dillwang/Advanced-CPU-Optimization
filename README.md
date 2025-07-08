@@ -74,6 +74,19 @@ The Perceptron and the Gshare are both finished. Here is a screenshot of their a
 
 # Register Renaming
 
+The register renaming optimization is a setup for Out of Order Execution. Each writes its own physical register; and you turn all false dependencies into just true RAW dependencies, enabling wide, speculation-driven out-of-order pipelines.
+
+We implemented a very similar module as described in the MIPS R10000 Paper.
+
+![image](https://github.com/user-attachments/assets/08b2c3e7-3301-4921-99dd-292728afd216)
+
+![image](https://github.com/user-attachments/assets/ebead8e1-23b0-4016-b5b0-e7a66c4efb3f)
+
+
+The register renaming will have its own pipeline stage on top of the baseline 5-stage pipeline.
+
+It features an active list, a register map table, a free list, and a busy bit table.
+
 # Out of Order Execution
 
 # Hardware Prefetching
