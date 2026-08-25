@@ -55,9 +55,12 @@
  *     more cycle going sequentially to pick the delay slot up,
  *   - in decode, the same idea with pend_valid, for the redirects that fetch
  *     did not already handle.
- * A group is also cut after any control instruction and its delay slot, so
- * there is only ever one prediction in flight per cycle and a squash can never
- * cut between a branch and its delay slot.
+ * A group ends at a control instruction only when that branch actually needs a
+ * decode redirect. The branch and its delay slot always travel together, so a
+ * squash can never cut between them, but a branch the target buffer predicted
+ * correctly -- which is nearly all of them, coin takes two decode redirects in
+ * 35.8 M instructions -- no longer ends the group. Cutting unconditionally was
+ * free at two wide and costs a slot per branch at three.
  */
 `include "mips_core.svh"
 
@@ -481,27 +484,40 @@ module frontend (
 				end
 				else if (is_ctrl[k])
 				begin
-					// Cut the group after a control instruction and its delay
-					// slot, so that only one prediction is in flight per cycle
-					// and the delay slot is never separated from its branch by
-					// a group boundary that a squash could cut through.
+					// A control instruction and its delay slot go together, and
+					// the group ends there only when it has to. Stopping
+					// unconditionally is what a two wide front end could afford;
+					// at three it costs a slot on every branch, and coin is one
+					// branch in five.
+					//
+					// The only thing that actually needs the cut is a redirect,
+					// because decode can raise one per cycle. When the target
+					// buffer predicted this branch correctly -- which is the
+					// overwhelming case, coin takes two decode redirects in
+					// 35.8 M instructions -- there is nothing to raise and the
+					// group can carry on past it.
 					if ((k + 1 < FE_WIDTH) && present[k + 1])
-						accept_n = 3'(k) + 3'd2;
-
-					if (want_redirect[k])
 					begin
-						if (accept_n == 3'(k) + 3'd2)
+						accept_n = 3'(k) + 3'd2;
+						if (want_redirect[k])
 						begin
 							dec_redirect = 1'b1;
 							dec_redirect_pc = want_tgt[k];
+							stop = 1'b1;
 						end
-						else
+					end
+					else
+					begin
+						// The delay slot has not been fetched yet. Hold the
+						// redirect until it has been, and end the group here
+						// whether or not there is one.
+						if (want_redirect[k])
 						begin
 							set_pend = 1'b1;
 							set_pend_pc = want_tgt[k];
 						end
+						stop = 1'b1;
 					end
-					stop = 1'b1;
 				end
 			end
 			else

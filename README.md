@@ -445,12 +445,12 @@ so cycles and CPI carry all the information.
 
 | benchmark | baseline (in-order) | + caches | + front end | + non-blocking | + memory spec. | + window sizing | + wide fetch | **+ 3-wide** | speedup | IPC |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| nqueens   | 1,722,402  | 890,370    | 807,339    | 764,041    | 763,961    | 763,332    | 757,970    | **647,872**    | **2.66×** | 1.57 |
-| quickSort | 9,572,553  | 5,492,808  | 5,240,726  | 4,528,689  | 4,235,844  | 3,495,796  | 3,400,154  | **3,050,477**  | **3.14×** | 1.35 |
-| esift2    | 21,375,975 | 5,814,714  | 4,834,600  | 4,835,486  | 4,835,486  | 4,835,133  | 4,557,362  | **3,333,506**  | **6.41×** | **2.36** |
-| coin      | 35,944,392 | 34,162,087 | 27,294,090 | 26,211,879 | 26,212,489 | 25,207,827 | 21,405,644 | **17,682,190** | **2.03×** | **2.02** |
+| nqueens   | 1,722,402  | 890,370    | 807,339    | 764,041    | 763,961    | 763,332    | 757,970    | **642,551**    | **2.68×** | 1.58 |
+| quickSort | 9,572,553  | 5,492,808  | 5,240,726  | 4,528,689  | 4,235,844  | 3,495,796  | 3,400,154  | **3,024,375**  | **3.17×** | 1.36 |
+| esift2    | 21,375,975 | 5,814,714  | 4,834,600  | 4,835,486  | 4,835,486  | 4,835,133  | 4,557,362  | **3,333,501**  | **6.41×** | **2.36** |
+| coin      | 35,944,392 | 34,162,087 | 27,294,090 | 26,211,879 | 26,212,489 | 25,207,827 | 21,405,644 | **17,682,325** | **2.03×** | **2.02** |
 
-Geometric mean **3.23×**, with two benchmarks past IPC 2.0 against a ceiling that is now 3.0. The columns are cumulative: the out-of-order core at the original 2 KB
+Geometric mean **3.24×**, with two benchmarks past IPC 2.0 against a ceiling that is now 3.0. The columns are cumulative: the out-of-order core at the original 2 KB
 caches, then 8 KB instruction cache and 4-way 16 KB data cache, then prediction moved into fetch
 with a branch target buffer and the D-cache port pipelined, then the data cache made non-blocking,
 then loads allowed to speculate past unresolved stores, then the window sized against
@@ -703,6 +703,31 @@ is worth nothing without a wider front end to feed it and a wider commit to drai
 measured separately say so exactly.
 
 esift2 reaches **IPC 2.356** and coin **2.023**, both clean through the old two-wide ceiling.
+
+#### The group cut, and a prediction that was wrong
+
+At three wide the decode group ending at every control instruction started to cost: coin accepted a
+single instruction on 32.3% of its cycles. Since the cut only exists so that decode raises at most
+one redirect per cycle, and coin takes **two decode redirects in 35.8 M instructions**, ending the
+group only when a redirect is actually needed looked like it should recover most of that.
+
+It did not. Relaxing it left coin's `fe_accept_1` at 5,711,492 against 5,711,419 — unchanged — and
+coin 135 cycles slower. The cut was not what was costing it. One stage earlier, `fb_only1` is
+5,971,894: the fetch *buffer* holds a single entry on 33.8% of cycles, and decode cannot accept
+three when only one is there. Fetch is short for the old reason, one branch at a time:
+
+```
+coin, three wide:  fe_push_1  7,957,395  (45% of cycles push one word)
+                   of which pend  7,051,895   vs 7,181,543 conditional branches
+```
+
+Still essentially one per branch. Widening fetch from two to four moved the boundary without
+removing the mechanism: a branch landing in the last *pushed* slot still forces its delay slot into
+a fetch cycle of its own.
+
+The relaxation is kept because it is a small real gain where the group was binding — quickSort
+1.009×, nqueens 1.008×, +0.4% geometric mean, and all four still match their traces, so the
+delay-slot reasoning held even though the sizing did not.
 
 ### What actually bounds the window
 
