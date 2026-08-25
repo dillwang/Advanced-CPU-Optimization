@@ -280,9 +280,12 @@ module issue_queue (
 			automatic int n_ready_mem = 0;
 			automatic int n_dep_held = 0;
 			automatic int n_dep_blocked = 0;
+			automatic int n_occ = 0;
 
 			for (int i = 0; i < IQ_ENTRIES; i++)
 			begin
+				if (q_valid[i])
+					n_occ = n_occ + 1;
 				if (mem_dep_held[i])
 					n_dep_held = n_dep_held + 1;
 				if (mem_dep_blocked[i])
@@ -308,6 +311,31 @@ module issue_queue (
 			// What the predictor is still refusing to speculate.
 			if (n_dep_blocked >= 1) stats_event("memdep_blocked");
 			if ((n_dep_blocked >= 1) && (n_ready == 0)) stats_event("memdep_blocked_idle");
+
+			// Why a cycle issued nothing. These three are exclusive and sum to
+			// the cycles where no instruction started, which is the largest
+			// single loss left in the machine -- so it matters a great deal
+			// which of them it is.
+			//   iq_empty      the window is empty. The front end did not
+			//                 deliver: a misprediction drained it, or fetch is
+			//                 behind.
+			//   iq_none_ready the window holds work but no operand is ready.
+			//                 Dependence chains and result latency.
+			//   iq_blocked    something is ready and still did not start. A
+			//                 structural conflict, today only the memory port.
+			if (!issue_hit[0])
+			begin
+				if (n_occ == 0)          stats_event("iq_empty");
+				else if (n_ready == 0)   stats_event("iq_none_ready");
+				else                     stats_event("iq_blocked");
+			end
+			// How full the window is when it has nothing ready. A deep queue
+			// with nothing runnable is a dependence chain; a shallow one is the
+			// front end not keeping up.
+			if ((n_ready == 0) && (n_occ >= 8))  stats_event("iq_stuck_ge8");
+			if ((n_ready == 0) && (n_occ >= 16)) stats_event("iq_stuck_ge16");
+			if (n_occ >= 16) stats_event("iq_occ_ge16");
+			if (n_occ >= 24) stats_event("iq_occ_ge24");
 		end
 	end
 `endif

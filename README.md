@@ -573,6 +573,52 @@ miss-status registers contend for exactly the same structures and the ablation a
 answered the question. The instruction-side stream buffer stays, because the I-cache is still
 blocking and the buffer is its only source of overlap.
 
+### What the front end really delivers
+
+Splitting the cycles that issue nothing into three exclusive causes — the window was empty, the
+window held work but nothing had its operands, or something was ready and could not start — gives
+the clearest picture of the machine there has been:
+
+| benchmark | issues nothing | window empty | none ready | ready but blocked | window ≥16 when stuck |
+| --- | --- | --- | --- | --- | --- |
+| coin      | 22.9% | 0.9%  | **20.6%** | 1.4% | 0% |
+| quickSort | 18.1% | 6.9%  | **10.6%** | 0.6% | **69%** |
+| esift2    | 8.3%  | 2.6%  | **5.7%**  | 0.0% | 0% |
+| nqueens   | 16.0% | **12.8%** | 1.8%  | 1.4% | 1% |
+
+Structural conflicts are finished as a source of loss: `iq_blocked` is 1.4% on coin and **six
+cycles** on esift2. Mispredictions are not coin's problem either — 145,176 of them produce only
+232,820 empty-window cycles, 1.6 cycles each, because the branch target buffer refills the window
+almost immediately.
+
+That leaves *nothing ready*, which is much the largest loss in the machine at 5.85 M cycles across
+the suite against 695 k of empty window. But it is two different problems sharing a name, and the
+occupancy buckets separate them. On quickSort the window holds **16 or more entries 69% of the
+time** it is stuck: a deep window waiting on memory, which matches a fill outstanding 31.2% of the
+run. On coin and esift2 the window **never reaches 16 entries at all**.
+
+A shallow window with nothing ready is the interesting case, because instructions that cannot issue
+should pile up. They were not piling up, which means they were not arriving:
+
+| | offers 0 | offers **1** | offers 2 | mean | actual IPC |
+| --- | --- | --- | --- | --- | --- |
+| coin   | 1.2% | **49.0%** | 49.8% | 1.487/cycle | **1.419** |
+| esift2 | 0.8% | **30.2%** | 69.0% | 1.681/cycle | **1.625** |
+
+**coin's front end offers rename a single instruction on half of all cycles, and its IPC is within
+5% of its delivery rate.** The two-wide back end is being fed 1.49 instructions per cycle and
+retiring 1.42. It is not short of parallelism; it is short of instructions. The 20.6% "nothing
+ready" is a consequence — at 1.42 arrivals per cycle against two issue slots the window can never
+accumulate, which is exactly why its occupancy never reaches 16.
+
+The mechanism is in `ooo/frontend.sv`: a fetch group is **cut after any control instruction and its
+delay slot**, so that only one prediction is in flight per cycle. coin is 20.1% conditional
+branches — one every five instructions — so the group is cut almost continuously.
+
+This is what `fetch_starved` could not see, and it is a good argument for measuring the thing you
+care about rather than a proxy for it. A completely empty fetch buffer is rare; a half-empty one is
+the common case and costs just as much.
+
 ### What actually bounds the window
 
 Widening the window was on the dead-end list at 1.02×, and that turned out to be an artefact: the
@@ -738,9 +784,16 @@ is exactly what the pipelined D-cache port then relieved.
   8,112 misses are refused outright. `NUM_MSHR` cannot simply be raised: the memory model accepts
   four outstanding reads **per AXI id** and the D-cache uses one, so going further means giving it a
   second master id. That is the clearest remaining ceiling on the one memory-bound benchmark.
-- **coin still stalls on the load/store queue** for 818,731 cycles, 3.2% of its run, even at 32
-  entries — doubling it was worth 1.04× and there may be more there. Worth measuring at 64 rather
-  than assuming either way, which is the lesson of the row above it.
+- **coin is capped by front-end delivery**, not by anything in the back end: it is offered a single
+  instruction on 49.0% of cycles and retires 1.42 per cycle against a delivery rate of 1.49. See
+  [what the front end really delivers](#what-the-front-end-really-delivers). Letting a fetch group
+  continue past a predicted-taken branch is the only change that addresses it, and coin is 25.2 M
+  of the suite's 34.3 M cycles.
+- **`LSQ_ENTRIES` 64 was measured and rejected.** It is worth 1.025× on coin (whose load/store
+  queue stalls go to zero) and *nothing* on the other three — quickSort is identical to the cycle.
+  That is +0.6% geometric mean for doubling a structure every entry of which sits in the
+  store-to-load forwarding CAM, the disambiguation scan and the violation scan. It buys cycles at
+  the direct expense of clock frequency, which the cycle counts here cannot see.
 - **quickSort's remaining stalls have no single owner**: reorder buffer 166,542, issue queue
   120,351, free list 32,218. The issue queue binding at all is new. There is no next parameter.
 - **nqueens is limited by branch accuracy** and nothing structural: 8,548 dispatch stalls in its
@@ -768,9 +821,13 @@ for:
 | quickSort | 82.5% | 59.5% | 29.8% | 4.6%  | 1.6%  | 4.0% |
 
 Three or more instructions are ready on 13.1% of coin's cycles and 23.4% of esift2's, so **4-wide is
-not worth it** — the parallelism to feed it is not in the window. Nor is **wider fetch**: the front
-end is starved on 0.6% of coin's cycles and 0.4% of esift2's, and nqueens' 7.7% is misprediction
-refill rather than fetch bandwidth. The front end already delivers more than the back end drains.
+not worth it** — the parallelism to feed it is not in the window.
+
+**The claim that used to sit here, that wider fetch is not worth building either, was wrong, and
+the way it was wrong is worth keeping.** It rested on `fetch_starved`, which is 0.6% on coin — but
+that counter only fires when the fetch buffer is *completely empty*. It says nothing about a buffer
+holding exactly one instruction, which turns out to be what actually happens. See
+[what the front end really delivers](#what-the-front-end-really-delivers).
 
 These numbers moved a lot when the cache stopped blocking, and in the informative direction.
 Before, two memory operations were ready together on a quarter of nqueens' cycles and 26% of

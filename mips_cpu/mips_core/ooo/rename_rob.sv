@@ -812,6 +812,19 @@ module rename_rob (
 			if (v_hit && (v_idx != mv_rob_idx)) stats_event("memdep_delayslot");
 			if (mv_valid && !rob[mv_rob_idx].valid) stats_event("memdep_stale");
 			if (fe_stall) stats_event("rename_stall");
+			// How many instructions the front end actually offers rename each
+			// cycle. fetch_starved only catches a completely empty buffer; a
+			// front end that delivers one instruction per cycle instead of two
+			// keeps the window shallow without ever looking starved.
+			if (n_live == 0) stats_event("fe_offer_0");
+			if (n_live == 1) stats_event("fe_offer_1");
+			if (n_live == 2) stats_event("fe_offer_2");
+			// And how many actually got in.
+			if (dispatch_go)
+			begin
+				if (live_n == 1) stats_event("disp_1");
+				if (live_n == 2) stats_event("disp_2");
+			end
 			// Which resource ran out. A stalled cycle can be short of more than
 			// one, so these sum to more than rename_stall.
 			if ((n_live != 0) && !have_room)
