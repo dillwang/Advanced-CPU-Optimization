@@ -505,6 +505,19 @@ module d_cache #(
                                 ? (in.addr + delta[`ADDR_WIDTH - 1 : 0])
                                 : (in.addr + `ADDR_WIDTH'(LINE_BYTES));
 
+                        `ifdef SIMULATION
+                            // How predictable the miss stream actually is, so
+                            // that "would a better prefetcher help" is a
+                            // measurement rather than an opinion. Counted for
+                            // every miss whether or not the prefetcher is built.
+                            stats_event("Dmiss_event");
+                            if (pf_seen_miss && (delta == pf_last_delta) && (delta != 0))
+                                stats_event("Dmiss_same_delta");
+                            if (pf_seen_miss && (delta == $signed(`ADDR_WIDTH'(LINE_BYTES))))
+                                stats_event("Dmiss_next_line");
+                            if (pf_seen_miss && (delta > 0) && (delta <= 33'sd256))
+                                stats_event("Dmiss_fwd_near");
+                        `endif
                             pf_stride_ok <= pf_seen_miss && (delta == pf_last_delta) && (delta != 0);
                             pf_last_delta <= delta;
                             pf_last_miss <= in.addr;

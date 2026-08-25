@@ -240,6 +240,8 @@ module issue_queue (
 	// buffer forever with nothing able to execute it, and the machine would
 	// simply stop retiring. Fail loudly instead of hanging.
 `ifdef SIMULATION
+	import "DPI-C" function void stats_event (input string e);
+
 	always_ff @(posedge clk)
 	begin
 		if (rst_n)
@@ -250,6 +252,36 @@ module issue_queue (
 					$fatal(1, "issue_queue: dispatched pc=%x found no slot (iq_free=%0d)",
 						disp_uop[k].pc, iq_free);
 			end
+		end
+	end
+
+	// How much parallelism the window actually holds, independent of how much
+	// of it the two issue ports can take. A wider machine can only pay for
+	// itself if there are regularly more than two ready instructions here, and
+	// only if the single memory port is not what they are all waiting on.
+	always_ff @(posedge clk)
+	begin
+		if (rst_n)
+		begin
+			automatic int n_ready = 0;
+			automatic int n_ready_mem = 0;
+
+			for (int i = 0; i < IQ_ENTRIES; i++)
+			begin
+				if (ready[i])
+				begin
+					n_ready = n_ready + 1;
+					if (q[i].is_mem)
+						n_ready_mem = n_ready_mem + 1;
+				end
+			end
+
+			if (n_ready >= 1) stats_event("ready_ge1");
+			if (n_ready >= 2) stats_event("ready_ge2");
+			if (n_ready >= 3) stats_event("ready_ge3");
+			if (n_ready >= 4) stats_event("ready_ge4");
+			if (n_ready >= 6) stats_event("ready_ge6");
+			if (n_ready_mem >= 2) stats_event("ready_mem_ge2");
 		end
 	end
 `endif
