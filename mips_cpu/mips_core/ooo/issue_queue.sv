@@ -59,6 +59,11 @@ module issue_queue (
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 	// |||| Readiness
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+	// A load whose operands are ready and which is held back only because an
+	// older store has not computed its address yet. This is what a memory
+	// dependence predictor would let issue.
+	logic mem_dep_held [IQ_ENTRIES];
+
 	always_comb
 	begin
 		for (int i = 0; i < IQ_ENTRIES; i++)
@@ -79,9 +84,11 @@ module issue_queue (
 			// A load may not pass a store whose address is still unknown.
 			// Older stores have all computed their addresses once no
 			// unresolved store is older than this load.
-			if (q[i].is_mem && (q[i].mem_action == READ)
+			mem_dep_held[i] = q[i].is_mem && (q[i].mem_action == READ)
+				&& ready[i]
 				&& lsq_has_unresolved_store
-				&& (age[i] > {1'b0, rob_idx_t'(lsq_oldest_unresolved - rob_head)}))
+				&& (age[i] > {1'b0, rob_idx_t'(lsq_oldest_unresolved - rob_head)});
+			if (mem_dep_held[i])
 				ready[i] = 1'b0;
 
 			// An entry this cycle's squash is about to kill must not start.
@@ -265,9 +272,12 @@ module issue_queue (
 		begin
 			automatic int n_ready = 0;
 			automatic int n_ready_mem = 0;
+			automatic int n_dep_held = 0;
 
 			for (int i = 0; i < IQ_ENTRIES; i++)
 			begin
+				if (mem_dep_held[i])
+					n_dep_held = n_dep_held + 1;
 				if (ready[i])
 				begin
 					n_ready = n_ready + 1;
@@ -282,6 +292,10 @@ module issue_queue (
 			if (n_ready >= 4) stats_event("ready_ge4");
 			if (n_ready >= 6) stats_event("ready_ge6");
 			if (n_ready_mem >= 2) stats_event("ready_mem_ge2");
+			// Loads that would issue right now if the machine speculated on
+			// memory dependences instead of waiting for every older store.
+			if (n_dep_held >= 1) stats_event("memdep_held");
+			if ((n_dep_held >= 1) && (n_ready == 0)) stats_event("memdep_held_idle");
 		end
 	end
 `endif

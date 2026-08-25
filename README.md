@@ -543,12 +543,30 @@ is exactly what the pipelined D-cache port then relieved.
 
 #### What is left
 
-- **quickSort is still memory bound**, but for a different reason than before. Its misses now
-  overlap — 11.2% of its cycles have two or more fills in flight — and the miss-status registers
-  themselves are never full. What is left is bandwidth and latency: 22,179 line fills against a
-  100-cycle memory, on a single cache port. Beyond this the next real step is a **second memory
-  port**, so two independent accesses can be in the cache at once, rather than anything else inside
-  the cache.
+- **quickSort spends 18.9% of its cycles completely idle with a load it is not allowed to run.**
+  This is now the largest single measured opportunity anywhere in the design, and it is not a cache
+  problem. A load may not issue until every older store has computed its address, which is what
+  makes disambiguation exact and replay unnecessary — and on quickSort that rule is expensive:
+
+  | benchmark | a load held by the rule | *and nothing else ready to issue* |
+  | --- | --- | --- |
+  | quickSort | 991,094 (21.9%) | **854,588 (18.9%)** |
+  | coin      | 1,576,494 (6.0%) | **0** |
+  | nqueens   | 43,334 (5.7%) | **0** |
+  | esift2    | 3,131 (0.1%) | 3 |
+
+  The second column is what matters, and it is the whole story: on coin and nqueens a held load
+  never costs a cycle, because something else is always ready to take the slot. On quickSort there
+  is nothing else. Speculating on memory dependences (a store-set predictor, with a memory-order
+  violation recovering through the existing squash path) is therefore a one-benchmark change —
+  but that one benchmark is the worst-performing of the four, at IPC 0.91. The replay machinery it
+  needs already exists: the load/store queue grew `waiting`/`replay` for the miss-status registers.
+- **The window-size result should be re-measured.** Widening the window was recorded as worth 1.02×,
+  but that was taken with a *blocking* cache, where D-cache miss cycles came out identical to
+  within one cycle whatever the window size — the cache serialised everything regardless. Now that
+  misses overlap, the window is what determines how many independent misses can be found at once,
+  and a 64-entry reorder buffer at IPC 1 covers about 64 cycles against a 112-cycle miss. That
+  ablation is no longer valid evidence.
 - **nqueens is limited by branch accuracy**, at 76.3%. It is the one benchmark where a stronger
   direction predictor (TAGE) would pay; on coin and esift2 the tournament predictor is already at
   98% and there is nothing to win.
@@ -560,20 +578,28 @@ benchmark this design served worst, at 1.05×; it is now 1.37×, and the gap tha
 entirely front end.
 
 Window occupancy was measured directly to answer whether a **wider machine** would help, by
-counting how many issue-queue entries are ready each cycle:
+counting how many issue-queue entries are ready each cycle. All four columns are of the
+non-blocking design, and `fetch_starved` is included because widening fetch is the other obvious
+thing to reach for:
 
-| benchmark | ≥1 ready | ≥2 | ≥3 | ≥4 | ≥2 memory ops ready |
-| --- | --- | --- | --- | --- | --- |
-| coin      | 81.9% | 69.8% | 12.9% | 5.7%  | 16.7% |
-| esift2    | 93.6% | 71.4% | 23.4% | ~0    | ~0 |
-| nqueens   | 87.9% | 65.9% | 46.7% | 24.8% | 25.0% |
-| quickSort | 83.4% | 66.1% | —     | 26.0% | — |
+| benchmark | ≥1 ready | ≥2 | ≥3 | ≥4 | ≥2 memory ops | fetch starved |
+| --- | --- | --- | --- | --- | --- | --- |
+| esift2    | 91.8% | 71.4% | 23.4% | ~0    | ~0    | 0.4% |
+| coin      | 78.6% | 68.0% | 8.8%  | 1.3%  | 7.5%  | 0.6% |
+| nqueens   | 85.4% | 63.9% | 41.9% | 16.4% | 17.9% | 7.7% |
+| quickSort | 60.6% | 43.8% | 21.4% | 3.2%  | 1.2%  | 3.0% |
 
-Three or more instructions are ready on 13% of coin's cycles and 23% of esift2's, so **4-wide is
-not worth it** — the parallelism to feed it is not in the window. 3-wide would find something on
-nqueens and quickSort and very little on the two large benchmarks. The one structure the counts do
-argue for is a second memory port: two memory operations are ready together on a quarter of
-nqueens' cycles and a sixth of coin's, and today they have to take turns.
+Three or more instructions are ready on 8.8% of coin's cycles and 23.4% of esift2's, so **4-wide is
+not worth it** — the parallelism to feed it is not in the window. Nor is **wider fetch**: the front
+end is starved on 0.6% of coin's cycles and 0.4% of esift2's, and nqueens' 7.7% is misprediction
+refill rather than fetch bandwidth. The front end already delivers more than the back end drains.
+
+These numbers moved a lot when the cache stopped blocking, and in the informative direction.
+Before, two memory operations were ready together on a quarter of nqueens' cycles and 26% of
+quickSort's, which looked like a clear argument for a second cache port. Almost all of that was
+memory operations *piling up ready behind a blocked port* — with the port free, quickSort's figure
+collapses from 26% to 1.2%. The second port would have been built to relieve a queue that no
+longer forms.
 
 # Simulation
 
