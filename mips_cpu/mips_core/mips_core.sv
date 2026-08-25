@@ -104,9 +104,12 @@ module mips_core (
 	mips_core_pkg::BranchOutcome rec_outcome;
 
 	// |||| Memory
-	logic mem_d_cache_pf_allow;
 	d_cache_input_ifc mem_d_cache_input();
 	cache_output_ifc mem_d_cache_output();
+	logic mem_d_cache_miss_pending;
+	mips_core_pkg::mshr_id_t mem_d_cache_mshr_id;
+	logic mem_d_cache_fill_valid;
+	mips_core_pkg::mshr_id_t mem_d_cache_fill_id;
 
 	axi_write_address axi_write_address();
 	axi_write_data axi_write_data();
@@ -219,9 +222,12 @@ module mips_core (
 		.fb_perc, .fb_gshare, .fb_outcome,
 		.rec_valid, .rec_hist, .rec_shift, .rec_outcome,
 
-		.dc_pf_allow (mem_d_cache_pf_allow),
 		.dc_in  (mem_d_cache_input),
 		.dc_out (mem_d_cache_output),
+		.dc_miss_pending (mem_d_cache_miss_pending),
+		.dc_mshr_id      (mem_d_cache_mshr_id),
+		.dc_fill_valid   (mem_d_cache_fill_valid),
+		.dc_fill_id      (mem_d_cache_fill_id),
 
 		.done
 	);
@@ -229,10 +235,13 @@ module mips_core (
 	d_cache D_CACHE (
 		.clk, .rst_n,
 
-		.i_pf_allow(mem_d_cache_pf_allow),
-
 		.in(mem_d_cache_input),
 		.out(mem_d_cache_output),
+
+		.o_miss_pending(mem_d_cache_miss_pending),
+		.o_mshr_id     (mem_d_cache_mshr_id),
+		.o_fill_valid  (mem_d_cache_fill_valid),
+		.o_fill_id     (mem_d_cache_fill_id),
 
 		.mem_read_address(mem_read_address[1]),
 		.mem_read_data   (mem_read_data[1]),

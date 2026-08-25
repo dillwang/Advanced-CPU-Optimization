@@ -601,7 +601,9 @@ module d_cache #(
                 if (miss && mshr_match) stats_event("Dmiss_merged");
                 if (miss && !o_miss_pending) stats_event("Dmiss_refused");
                 if (f_push) stats_event("D-Cache_writeback");
+                if (m_count != 0) stats_event("Dmiss_inflight");
                 if (m_count > 1) stats_event("Dmiss_overlapped");
+                if (mshr_full) stats_event("Dmiss_regs_full");
             end
         end
     `endif

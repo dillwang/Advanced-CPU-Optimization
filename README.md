@@ -8,6 +8,8 @@ Implemented:
 - Tournament branch prediction (perceptron + gshare with a chooser)
 - Register renaming (MIPS R10000 style)
 - Superscalar out-of-order execution
+- Branch target buffer, so prediction happens in fetch rather than decode
+- Non-blocking data cache with miss status holding registers
 - Next-line hardware prefetching with a stream buffer
 
 Every number in this README was measured with the simulator on this repository. See
@@ -65,7 +67,8 @@ instruction can therefore never be observed.
 | `ooo/ooo_backend.sv` | Back-end glue and the execution units |
 | `branch_predictor_files/tournament_predictor.sv` | Perceptron + gshare + chooser |
 | `stream_buffer.sv` | Next-line prefetcher |
-| `i_cache.sv`, `d_cache.sv`, `memory_arbiter.sv` | Unchanged from the baseline, except that the I-cache now returns two contiguous words per fetch |
+| `d_cache.sv` | 4-way write-back data cache, non-blocking: miss status holding registers and a decoupled writeback queue |
+| `i_cache.sv`, `memory_arbiter.sv` | Unchanged from the baseline, except that the I-cache now returns two contiguous words per fetch |
 
 ---
 
@@ -213,8 +216,98 @@ for two cycles and capped memory throughput at 0.5 accesses per cycle. Replacing
 with a one-deep pipeline register removes the idle cycle and doubles the ceiling. A stalled access
 holds its own address on `addr_next` so the SRAM read is set up again for when the refill finishes.
 
+Because the cache is [non-blocking](#non-blocking-data-cache), an access gets one of three answers
+in the cycle it is presented, and only the third keeps the port:
+
+| answer | meaning |
+| --- | --- |
+| `dc_out.valid` | it hit; the access is finished |
+| `dc_miss_pending` | it missed and register `dc_mshr_id` has taken on the fill. The access leaves the port immediately and its queue entry is marked *waiting*; `dc_fill_valid` later announces that id, every entry waiting on it is marked for *replay*, and the queue puts it back on the port, where it hits |
+| neither | the cache could not take it. The access stays on the port and is presented again |
+
+Waiting lives in the queue entry rather than on the port, which is what lets several loads be
+outstanding at once. A committing store that misses parks the same way, keeping `st_valid` asserted
+in the reorder buffer instead of holding the port for the whole refill.
+
 `jr`/`jalr` targets come out of a register, so they are resolved at execute and redirect through the
 same recovery path as a mispredicted branch. Direct `j`/`jal` are resolved by the front end.
+
+---
+
+# Non-blocking Data Cache
+
+The original data cache ran one miss at a time. An access that missed took the whole cache into a
+refill state machine, and every later access -- including ones that would have hit -- waited out
+the full memory latency behind it. On quickSort that was **22,179 misses at 112 cycles each, 47% of
+the entire run, none of them overlapping**.
+
+**Miss status holding registers** (Kroft, 1981) remove that. Each register records one line fill
+that is in flight: its address and the way it will land in, and nothing else. On a miss the cache
+allocates one and answers *pending* rather than stalling, so the very next cycle it can serve a hit
+or take another miss. Four fills can be outstanding, and their latencies overlap.
+
+Three things make this tractable here:
+
+- **Replies do not have to be matched to registers.** Reads on one AXI id are returned in order, so
+  the registers are a FIFO and returning data always belongs to the entry at the head.
+- **A second access to a line already in flight merges** into the existing register instead of
+  allocating a new one, and shares its memory request. On quickSort 41,550 of 63,729 parked
+  accesses -- 65% -- are merges.
+- **Dirty evictions are decoupled.** The victim line is copied out of the data banks into a
+  writeback queue in the same cycle the miss is taken, and the way is invalidated immediately, so
+  the refill can land whenever it likes and the queue drains to memory on its own.
+
+The requests *waiting* on a fill are not tracked in the cache at all -- that is the load/store
+queue's job, described under [memory ordering](#memory-ordering). Keeping the wait list out of the
+cache is what keeps a register down to a tag, an index and a way.
+
+### The two rules that have to be enforced by hand
+
+**Writebacks can be overtaken.** The memory model delays writes by 120 cycles and reads by 100, so
+a read issued after a write to the same address can still beat it to memory and return stale data.
+An access whose line is sitting in the writeback queue is therefore *refused* until that writeback
+has been acknowledged, and the queue simply presents it again.
+
+**A way that a fill is aimed at cannot be picked again.** Victim selection skips any way already
+reserved by a valid register at that index; otherwise two fills for different lines would land in
+the same way, or one line would end up resident in two ways at once. With four ways and four
+registers this can leave no legal victim, in which case the miss is refused and retried -- which
+happened **twice** in the whole of quickSort.
+
+### What it is worth
+
+| benchmark | blocking cache | non-blocking | gain |
+| --- | --- | --- | --- |
+| quickSort | 5,240,726  | **4,528,689**  | **1.157×** |
+| nqueens   | 807,339    | **764,041**    | 1.057× |
+| coin      | 27,294,090 | **26,211,879** | 1.041× |
+| esift2    | 4,834,600  | 4,835,486      | 0.9998× |
+
+quickSort is the benchmark this was built for and gains the most, but the change is not only about
+misses: nqueens takes 96 D-cache misses in its entire run and still gains 5.7%, and coin takes 29
+and gains 4.1%. That part is the port discipline the rewrite allowed. A miss no longer stalls, so
+the queue no longer has to gate *all* memory issue on the port being free -- a memory operation may
+now issue whenever the load writeback port is not about to be contended, and only loads that
+actually need the cache wait for a slot. On coin that alone drops `rename_stall` from 3,225,107 to
+2,104,286.
+
+esift2 loses 886 cycles out of 4.8 M, one part in 5,500, from the occasional cycle the port is held
+back so a forwarded load can use the writeback port. It takes 783 misses in the whole run, so there
+is nothing there for the registers to recover.
+
+Measured on quickSort, where the overlap actually happens:
+
+| | cycles | share of run |
+| --- | --- | --- |
+| at least one fill outstanding | 1,884,974 | 41.6% |
+| two or more outstanding | 509,445 | 11.2% |
+| a load parked waiting on a fill | 1,831,430 | 40.4% |
+| registers full, forcing a miss to be refused | 0 | -- |
+
+Those 22,179 fills carry 2.48 M cycles of memory latency between them, and they now fit inside a
+1.88 M cycle window -- and, unlike before, the core keeps retiring instructions throughout it. The
+registers themselves are never the constraint: four is already as many reads as the memory model
+will accept on one id.
 
 ---
 
@@ -256,28 +349,30 @@ run to completion with all three streams matching.**
 Cycle counts, lower is better. Instruction counts match the baseline exactly on every benchmark,
 so cycles and CPI carry all the information.
 
-| benchmark | baseline (in-order) | out-of-order core | + caches | **final** | speedup | IPC |
-| --- | --- | --- | --- | --- | --- | --- |
-| nqueens   | 1,722,402  | 1,609,896  | 890,370    | **807,339**    | **2.13×** | 1.26 |
-| quickSort | 9,572,553  | 7,740,489  | 5,492,808  | **5,240,726**  | **1.83×** | 0.78 |
-| esift2    | 21,375,975 | 17,254,324 | 5,814,714  | **4,834,600**  | **4.42×** | 1.62 |
-| coin      | 35,944,392 | —          | 34,162,087 | **27,294,090** | **1.32×** | 1.31 |
+| benchmark | baseline (in-order) | out-of-order core | + caches | + front end | **final** | speedup | IPC |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| nqueens   | 1,722,402  | 1,609,896  | 890,370    | 807,339    | **764,041**    | **2.25×** | 1.33 |
+| quickSort | 9,572,553  | 7,740,489  | 5,492,808  | 5,240,726  | **4,528,689**  | **2.11×** | 0.91 |
+| esift2    | 21,375,975 | 17,254,324 | 5,814,714  | 4,834,600  | **4,835,486**  | **4.42×** | 1.62 |
+| coin      | 35,944,392 | —          | 34,162,087 | 27,294,090 | **26,211,879** | **1.37×** | 1.36 |
 
-Geometric mean **2.18×**. The columns are cumulative: the out-of-order core at the original 2 KB
+Geometric mean **2.32×**. The columns are cumulative: the out-of-order core at the original 2 KB
 caches, then 8 KB instruction cache and 4-way 16 KB data cache, then prediction moved into fetch
-with a branch target buffer and the D-cache port pipelined.
+with a branch target buffer and the D-cache port pipelined, then the data cache made non-blocking.
 
-The last column is worth isolating, because it is the only change that helped every benchmark:
+The last two columns are worth isolating, because they are the changes that helped every benchmark
+rather than one:
 
-| benchmark | before front end work | + BTB in fetch | + pipelined D-cache port | total |
-| --- | --- | --- | --- | --- |
-| nqueens   | 890,370    | 860,124    | **807,349**    | **1.10×** |
-| quickSort | 5,492,808  | 5,273,026  | **5,239,953**  | **1.05×** |
-| esift2    | 5,814,714  | 4,834,598  | **4,834,598**  | **1.20×** |
-| coin      | 34,162,087 | 28,492,663 | **27,294,122** | **1.25×** |
+| benchmark | before front end work | + BTB in fetch | + pipelined D-cache port | + non-blocking D-cache | total |
+| --- | --- | --- | --- | --- | --- |
+| nqueens   | 890,370    | 860,124    | 807,349    | **764,041**    | **1.17×** |
+| quickSort | 5,492,808  | 5,273,026  | 5,239,953  | **4,528,689**  | **1.21×** |
+| esift2    | 5,814,714  | 4,834,598  | 4,834,598  | **4,835,486**  | **1.20×** |
+| coin      | 34,162,087 | 28,492,663 | 27,294,122 | **26,211,879** | **1.30×** |
 
-esift2 gains nothing at all from the pipelined port — to the cycle — and coin gains 1.04×. The two
-changes are almost disjoint in what they fix, which is why both were worth doing.
+The three changes are almost disjoint in what they fix, which is why all three were worth doing.
+esift2's entire gain is the BTB, quickSort's is mostly the miss-status registers, and coin's is
+mostly the BTB with a useful tail from the memory port becoming free to issue into.
 
 ### Where the time goes
 
@@ -295,9 +390,12 @@ are comparable:
 | | everything else | 8,477,359 | 4,355,688 | **1.95×** |
 
 On the cycles where memory is not stalling the machine reaches 1.33× to 1.95× — esift2 is
-essentially the theoretical maximum for a 2-wide core. Memory stall cycles are untouched, because
-both caches are blocking and the load/store queue services one access at a time: a miss stalls
-exactly as hard as it did in order.
+essentially the theoretical maximum for a 2-wide core. Memory stall cycles are untouched at this
+point in the history, because both caches were still blocking and the load/store queue serviced one
+access at a time: a miss stalled exactly as hard as it did in order. That is the column the
+[non-blocking data cache](#non-blocking-data-cache) went after, and it is why quickSort — the one
+benchmark whose "everything else" column was already good and whose memory column was flat — was
+the one that gained most from it.
 
 That is the whole story of this design. The out-of-order core roughly halves the compute half of
 the workload and can do nothing at all about the memory half, so what each benchmark gains depends
@@ -362,8 +460,20 @@ them completely.
 Both prefetchers are correctly implemented and both pipeline their requests, and neither earns its
 area, because these benchmarks miss on capacity and conflicts rather than on predictable address
 streams. Once the caches were sized properly there was almost nothing left to predict.
-**`ENABLE_PREFETCH` therefore defaults to 0**; the logic stays in the tree so the ablation above
-reproduces.
+
+The measurement that settled it was on the miss addresses themselves: on quickSort **51.3%** of
+consecutive D-cache misses repeat the previous stride and only 12.4% go to the next line, and on
+esift2 99.5% repeat the stride — yet a stride prefetcher recovers nothing from either. Prediction
+was never what was missing. What was missing was **overlap**: 22,179 misses that each stalled the
+whole cache for 112 cycles, one at a time. That is what the
+[non-blocking cache](#non-blocking-data-cache) fixed, and it is worth 1.16× on quickSort against
+the prefetcher's 0.065%.
+
+**The D-cache stride prefetcher has therefore been removed from the tree** — it was deleted with
+the non-blocking rewrite rather than carried along disabled, since a prefetcher and a set of
+miss-status registers contend for exactly the same structures and the ablation above had already
+answered the question. The instruction-side stream buffer stays, because the I-cache is still
+blocking and the buffer is its only source of overlap.
 
 ### Branch prediction accuracy
 
@@ -386,15 +496,17 @@ correspondingly longer to simulate.
 
 ### Where the remaining time goes
 
-With the caches fixed and the front end fixed, the bottleneck moved again, and it is now different
-on each benchmark:
+With the caches fixed, the front end fixed and the data cache no longer blocking, the bottleneck
+moved again, and it is now different on each benchmark. The D-cache column is the share of cycles
+with at least one line fill outstanding — no longer a stall, since the core keeps running through
+it, but still the window in which memory is the thing being waited on:
 
-| benchmark | IPC (ceiling 2.0) | D-cache miss | I-cache miss | limited by |
-| --- | --- | --- | --- | --- |
-| esift2    | 1.62 | 1.5%  | 0.04%  | the core |
-| coin      | 1.31 | 0.01% | 0.009% | the core |
-| nqueens   | 1.26 | 1.2%  | 1.9%   | branch accuracy |
-| quickSort | 0.78 | 45%   | 0.09%  | memory |
+| benchmark | IPC (ceiling 2.0) | D-cache misses | fill outstanding | I-cache stall | limited by |
+| --- | --- | --- | --- | --- | --- |
+| esift2    | 1.62 | 783    | 1.7%      | 0.05%  | the core |
+| coin      | 1.36 | 29     | 0.012%    | 0.011% | the core |
+| nqueens   | 1.33 | 96     | 1.4%      | 2.2%   | branch accuracy |
+| quickSort | 0.91 | 22,179 | **41.6%** | 0.11%  | memory |
 
 #### How the front-end problem was found, and what fixing it did
 
@@ -415,14 +527,14 @@ Two other candidates were ruled out by the same run: branch *accuracy* was alrea
 
 The [branch target buffer](#predicting-in-fetch-not-decode) removed it:
 
-| coin | before | after BTB | after pipelined port |
-| --- | --- | --- | --- |
-| cycles | 34,162,087 | 28,492,663 | **27,294,122** |
-| fetch_starved | 7,224,093 | 148,004 | 148,004 |
-| decode redirects | ~7.1 M | **1** | **1** |
-| cycles issuing nothing | 12,712,810 | 6,915,565 | 6,184,585 |
-| rename_stall | 2,687,230 | 4,536,081 | 3,225,107 |
-| IPC | 1.047 | 1.255 | **1.310** |
+| coin | before | after BTB | after pipelined port | after non-blocking D-cache |
+| --- | --- | --- | --- | --- |
+| cycles | 34,162,087 | 28,492,663 | 27,294,122 | **26,211,879** |
+| fetch_starved | 7,224,093 | 148,004 | 148,004 | 148,094 |
+| decode redirects | ~7.1 M | **1** | **1** | **1** |
+| cycles issuing nothing | 12,712,810 | 6,915,565 | 6,184,585 | 6,367,780 |
+| rename_stall | 2,687,230 | 4,536,081 | 3,225,107 | **2,104,286** |
+| IPC | 1.047 | 1.255 | 1.310 | **1.364** |
 
 One decode redirect in a 35.8 M instruction run: after the first execution of each static branch,
 the target buffer answers every one of them. `rename_stall` rising after the BTB is the bottleneck
@@ -431,18 +543,37 @@ is exactly what the pipelined D-cache port then relieved.
 
 #### What is left
 
-- **quickSort is memory bound and stays that way.** 45% of its accesses miss, both caches block, and
-  the load/store queue services one miss at a time. Miss-status holding registers, so that
-  independent misses overlap instead of serialising, are the only thing that would move it.
+- **quickSort is still memory bound**, but for a different reason than before. Its misses now
+  overlap — 11.2% of its cycles have two or more fills in flight — and the miss-status registers
+  themselves are never full. What is left is bandwidth and latency: 22,179 line fills against a
+  100-cycle memory, on a single cache port. Beyond this the next real step is a **second memory
+  port**, so two independent accesses can be in the cache at once, rather than anything else inside
+  the cache.
 - **nqueens is limited by branch accuracy**, at 76.3%. It is the one benchmark where a stronger
   direction predictor (TAGE) would pay; on coin and esift2 the tournament predictor is already at
   98% and there is nothing to win.
-- **esift2 and coin are core limited** at IPC 1.62 and 1.31 against a ceiling of 2.0. What is left
+- **esift2 and coin are core limited** at IPC 1.62 and 1.36 against a ceiling of 2.0. What is left
   there is issue width and dependence chains, not any single structure.
 
 For reference, the in-order baseline runs coin at IPC 0.995 — 99.5% of *its* ceiling. coin was the
-benchmark this design served worst, at 1.05×; it is now 1.32×, and the gap that closed was entirely
-front end.
+benchmark this design served worst, at 1.05×; it is now 1.37×, and the gap that closed was almost
+entirely front end.
+
+Window occupancy was measured directly to answer whether a **wider machine** would help, by
+counting how many issue-queue entries are ready each cycle:
+
+| benchmark | ≥1 ready | ≥2 | ≥3 | ≥4 | ≥2 memory ops ready |
+| --- | --- | --- | --- | --- | --- |
+| coin      | 81.9% | 69.8% | 12.9% | 5.7%  | 16.7% |
+| esift2    | 93.6% | 71.4% | 23.4% | ~0    | ~0 |
+| nqueens   | 87.9% | 65.9% | 46.7% | 24.8% | 25.0% |
+| quickSort | 83.4% | 66.1% | —     | 26.0% | — |
+
+Three or more instructions are ready on 13% of coin's cycles and 23% of esift2's, so **4-wide is
+not worth it** — the parallelism to feed it is not in the window. 3-wide would find something on
+nqueens and quickSort and very little on the two large benchmarks. The one structure the counts do
+argue for is a second memory port: two memory operations are ready together on a quarter of
+nqueens' cycles and a sixth of coin's, and today they have to take turns.
 
 # Simulation
 
