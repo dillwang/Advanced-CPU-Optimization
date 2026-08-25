@@ -98,8 +98,11 @@ module frontend (
 	import "DPI-C" function void stats_event (input string e);
 `endif
 
-	localparam int FB_DEPTH = 16;
-	localparam int FB_IDX_W = 4;
+	localparam int FB_DEPTH = 32;
+	localparam int FB_IDX_W = 5;
+	// Wide enough to hold 0..FETCH_WIDTH, so the counts scale with the width
+	// instead of being pinned to a literal.
+	localparam int FCNT_W = $clog2(FETCH_WIDTH) + 1;
 
 	// What fetch decided about one instruction, carried alongside it through
 	// the fetch buffer so that decode can check the decision and commit can
@@ -127,8 +130,8 @@ module frontend (
 	logic [FB_IDX_W : 0] fb_count;
 
 	logic [`ADDR_WIDTH - 1 : 0] pc_reg;
-	logic [2:0] push_n;
-	logic [2:0] pop_n;
+	logic [FCNT_W - 1 : 0] push_n;
+	logic [FCNT_W - 1 : 0] pop_n;
 	logic fb_flush;
 
 	assign o_pc_current = pc_reg;
@@ -176,7 +179,7 @@ module frontend (
 	// one is acted on: the word after it is that branch's delay slot, and a
 	// branch inside a delay slot is not something MIPS defines.
 	logic hit_found;
-	logic [2:0] hit_slot;
+	logic [FCNT_W - 1 : 0] hit_slot;
 
 	always_comb
 	begin
@@ -189,7 +192,7 @@ module frontend (
 				if (btb_hit[j])
 				begin
 					hit_found = 1'b1;
-					hit_slot = 3'(j);
+					hit_slot = FCNT_W'(j);
 				end
 			end
 		end
@@ -202,15 +205,15 @@ module frontend (
 	// two. That is still a full decode group, which is the point of fetching
 	// wider than decode -- the cost lands on fetch, where there is slack, and
 	// not on the buffer, which keeps handing decode two per cycle.
-	logic [2:0] push_limit;
+	logic [FCNT_W - 1 : 0] push_limit;
 	always_comb
 	begin
 		if (pend_fe_valid)
-			push_limit = 3'd1;
+			push_limit = FCNT_W'(1);
 		else if (hit_found)
-			push_limit = hit_slot + 3'd2;
+			push_limit = hit_slot + FCNT_W'(2);
 		else
-			push_limit = 3'(FETCH_WIDTH);
+			push_limit = FCNT_W'(FETCH_WIDTH);
 	end
 
 	// How many words the cache can give us for this line, limited by room in
@@ -224,7 +227,7 @@ module frontend (
 			begin
 				// Words must be contiguous: stop at the first one that falls
 				// outside the cache line.
-				if (i_word_valid[j] && (3'({1'b0, push_n}) == 3'(j))
+				if (i_word_valid[j] && (FCNT_W'({1'b0, push_n}) == FCNT_W'(j))
 					&& ({1'b0, fb_count} + {1'b0, push_n} + 1 <= FB_DEPTH)
 					&& (push_n < push_limit))
 					push_n = push_n + 1'b1;
@@ -249,7 +252,7 @@ module frontend (
 		hit_pc = fetch_pc[0];
 		for (int j = 0; j < FETCH_WIDTH; j++)
 		begin
-			if (3'(j) == hit_slot)
+			if (FCNT_W'(j) == hit_slot)
 			begin
 				hit_uncond = btb_uncond[j];
 				hit_target = btb_target[j];
@@ -268,7 +271,7 @@ module frontend (
 
 	// Did the delay slot make it into the buffer in the same cycle?
 	logic slot_pushed;
-	assign slot_pushed = (push_n > (hit_slot + 3'd1));
+	assign slot_pushed = (push_n > (hit_slot + FCNT_W'(1)));
 
 	logic set_pend_fe;
 	assign set_pend_fe = fe_taken && !slot_pushed;
@@ -309,7 +312,7 @@ module frontend (
 			push_pred[j].bp_gshare = NOT_TAKEN;
 			push_pred[j].bp_hist = bp_hist;
 
-			if (hit_found && (3'(j) == hit_slot))
+			if (hit_found && (FCNT_W'(j) == hit_slot))
 			begin
 				push_pred[j].btb_hit = 1'b1;
 				push_pred[j].btb_target = hit_target;
@@ -424,7 +427,7 @@ module frontend (
 
 	logic set_pend;
 	logic [`ADDR_WIDTH - 1 : 0] set_pend_pc;
-	logic [2:0] accept_n;
+	logic [FCNT_W - 1 : 0] accept_n;
 
 	always_comb
 	begin
@@ -473,7 +476,7 @@ module frontend (
 		begin
 			if (!stop && present[k])
 			begin
-				accept_n = 3'(k) + 3'd1;
+				accept_n = FCNT_W'(k) + FCNT_W'(1);
 
 				if (pend_valid && (k == 0))
 				begin
@@ -498,7 +501,7 @@ module frontend (
 					// group can carry on past it.
 					if ((k + 1 < FE_WIDTH) && present[k + 1])
 					begin
-						accept_n = 3'(k) + 3'd2;
+						accept_n = FCNT_W'(k) + FCNT_W'(2);
 						if (want_redirect[k])
 						begin
 							dec_redirect = 1'b1;
@@ -536,7 +539,7 @@ module frontend (
 
 		for (int k = FE_WIDTH - 1; k >= 0; k--)
 		begin
-			if (want_btb_fill[k] && ({1'b0, 3'(k)} < {1'b0, accept_n}) && !fe_stall)
+			if (want_btb_fill[k] && ({1'b0, FCNT_W'(k)} < {1'b0, accept_n}) && !fe_stall)
 			begin
 				btb_wr_valid = 1'b1;
 				btb_wr_pc = slot_pc[k];
@@ -554,7 +557,7 @@ module frontend (
 		for (int k = 0; k < FE_WIDTH; k++)
 		begin
 			fe_uop[k] = dec_raw[k];
-			fe_uop[k].valid = ({1'b0, 3'(k)} < {1'b0, accept_n}) && !ex_redirect_valid;
+			fe_uop[k].valid = ({1'b0, FCNT_W'(k)} < {1'b0, accept_n}) && !ex_redirect_valid;
 
 			// Only a conditional branch carries predictor state; nothing else
 			// trains anything, whatever it happened to be fetched alongside.
@@ -583,7 +586,7 @@ module frontend (
 				if (push_n == 3) stats_event("fe_push_3");
 				if (push_n == 4) stats_event("fe_push_4");
 				// ...and of the short pushes, which constraint bound.
-				if ((push_n < 3'(FETCH_WIDTH)) && !i_word_valid[FETCH_WIDTH - 1])
+				if ((push_n < FCNT_W'(FETCH_WIDTH)) && !i_word_valid[FETCH_WIDTH - 1])
 					stats_event("fe_push1_line");
 				else if ((push_n == 1) && pend_fe_valid)
 					stats_event("fe_push1_pend");
@@ -604,7 +607,7 @@ module frontend (
 	end
 `endif
 
-	assign pop_n = fe_stall ? 3'd0 : accept_n;
+	assign pop_n = fe_stall ? FCNT_W'(0) : accept_n;
 	assign fb_flush = ex_redirect_valid || dec_redirect_go;
 
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -627,7 +630,7 @@ module frontend (
 
 			for (int j = 0; j < FETCH_WIDTH; j++)
 			begin
-				if ({1'b0, 3'(j)} < {1'b0, push_n})
+				if ({1'b0, FCNT_W'(j)} < {1'b0, push_n})
 				begin
 					fb_pc[FB_IDX_W'(fb_tail + FB_IDX_W'(j))]
 						<= pc_reg + `ADDR_WIDTH'(j << 2);

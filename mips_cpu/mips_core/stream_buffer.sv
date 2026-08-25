@@ -33,7 +33,7 @@
 `include "mips_core.svh"
 
 module stream_buffer #(
-	parameter int BLOCK_OFFSET_WIDTH = 2,
+	parameter int BLOCK_OFFSET_WIDTH = 3,
 	parameter int DEPTH = 8,
 	parameter int MAX_OUTSTANDING = 4
 	)(

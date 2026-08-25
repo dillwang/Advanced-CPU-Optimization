@@ -121,8 +121,12 @@ parameter int FE_WIDTH     = 3;		// decode / rename / dispatch / commit width
 // of half-width fetch respectively -- together more than half the run, against
 // an instruction cache miss rate of 0.01%. Reading a whole line instead removes
 // both, and decode still takes FE_WIDTH per cycle off the other end.
-// Must not exceed the instruction cache's LINE_SIZE.
-parameter int FETCH_WIDTH  = 4;
+// Must not exceed the instruction cache's LINE_SIZE, which is why the cache
+// was regeometried to 8-word lines to go past four: 2 ways x 128 sets x 8 words
+// is the same 8 KB, and longer lines turned out to *reduce* instruction misses
+// (nqueens 16,814 -> 9,653) rather than costing hit rate for the halved set
+// count, because instruction fetch is overwhelmingly sequential.
+parameter int FETCH_WIDTH  = 8;
 parameter int ISSUE_WIDTH  = 3;		// instructions started per cycle
 // One writeback port per issue port for the ALUs, plus one for load data
 // returning from the load/store queue an arbitrary number of cycles later.

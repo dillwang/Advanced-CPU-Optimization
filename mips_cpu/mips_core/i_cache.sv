@@ -26,8 +26,8 @@
 `include "mips_core.svh"
 
 module i_cache #(
-    parameter INDEX_WIDTH = 8, // 8 KB cache size (2 ways x 256 sets x 4 words)
-    parameter BLOCK_OFFSET_WIDTH = 2,
+    parameter INDEX_WIDTH = 7, // 8 KB cache size (2 ways x 128 sets x 8 words)
+    parameter BLOCK_OFFSET_WIDTH = 3,
     parameter ASSOCIATIVITY = 2
     )(
     // General signals
