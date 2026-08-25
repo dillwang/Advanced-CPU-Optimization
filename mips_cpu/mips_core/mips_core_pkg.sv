@@ -92,8 +92,13 @@ typedef enum logic {
 // Sizing of the out of order back end. FE_WIDTH is the width of the entire
 // in-order front end (fetch, decode, rename, dispatch) and of commit; the two
 // have to match so that the machine can retire as fast as it can rename.
-parameter int PHYS_REGS    = 64;
-parameter int PRF_IDX_W    = 6;		// $clog2(PHYS_REGS)
+// The free list holds PHYS_REGS - ARCH_REGS spare tags, and that is what
+// bounds the window in practice rather than the reorder buffer. At 64 physical
+// registers only 32 tags are spare, so at most 32 register-writing instructions
+// can be in flight against a 64-entry reorder buffer -- the buffer could never
+// fill, and on quickSort the free list was 100% of every dispatch stall.
+parameter int PHYS_REGS    = 128;
+parameter int PRF_IDX_W    = 7;		// $clog2(PHYS_REGS)
 parameter int ARCH_REGS    = 32;
 parameter int ROB_ENTRIES  = 64;
 parameter int ROB_IDX_W    = 6;		// $clog2(ROB_ENTRIES)

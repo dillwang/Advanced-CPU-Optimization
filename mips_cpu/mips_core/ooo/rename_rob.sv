@@ -439,12 +439,17 @@ module rename_rob (
 
 	// Dispatch is all or nothing for the whole group, which keeps the front end
 	// in strict program order with no partial-group bookkeeping.
+	// Broken out per resource so that a dispatch stall can be attributed. They
+	// are not exclusive: a cycle can be short of several at once.
+	logic room_rob, room_preg, room_iq, room_lsq;
+
 	always_comb
 	begin
-		have_room = ({1'b0, rob_count} + {1'b0, n_live} <= (ROB_ENTRIES - 1))
-			&& (n_preg <= {1'b0, fl_count})
-			&& (n_live <= {1'b0, iq_free})
-			&& (n_lsq <= {1'b0, lsq_free});
+		room_rob  = ({1'b0, rob_count} + {1'b0, n_live} <= (ROB_ENTRIES - 1));
+		room_preg = (n_preg <= {1'b0, fl_count});
+		room_iq   = (n_live <= {1'b0, iq_free});
+		room_lsq  = (n_lsq <= {1'b0, lsq_free});
+		have_room = room_rob && room_preg && room_iq && room_lsq;
 		fe_stall = (n_live != 0) && (!have_room || squash);
 	end
 
@@ -807,6 +812,25 @@ module rename_rob (
 			if (v_hit && (v_idx != mv_rob_idx)) stats_event("memdep_delayslot");
 			if (mv_valid && !rob[mv_rob_idx].valid) stats_event("memdep_stale");
 			if (fe_stall) stats_event("rename_stall");
+			// Which resource ran out. A stalled cycle can be short of more than
+			// one, so these sum to more than rename_stall.
+			if ((n_live != 0) && !have_room)
+			begin
+				if (!room_rob)  stats_event("stall_rob");
+				if (!room_preg) stats_event("stall_preg");
+				if (!room_iq)   stats_event("stall_iq");
+				if (!room_lsq)  stats_event("stall_lsq");
+				// And the cycles where exactly one of them is the reason.
+				if (!room_rob && room_preg && room_iq && room_lsq)
+					stats_event("stall_only_rob");
+				if (room_rob && !room_preg && room_iq && room_lsq)
+					stats_event("stall_only_preg");
+				if (room_rob && room_preg && !room_iq && room_lsq)
+					stats_event("stall_only_iq");
+				if (room_rob && room_preg && room_iq && !room_lsq)
+					stats_event("stall_only_lsq");
+			end
+			if ((n_live != 0) && have_room && squash) stats_event("stall_squash");
 		end
 	end
 `endif
