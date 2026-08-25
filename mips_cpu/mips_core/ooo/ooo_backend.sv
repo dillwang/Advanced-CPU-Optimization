@@ -43,6 +43,7 @@ module ooo_backend (
 	output mips_core_pkg::BranchOutcome rec_outcome,
 
 	// ---- D cache ----
+	output logic dc_pf_allow,
 	d_cache_input_ifc.out dc_in,
 	cache_output_ifc.in dc_out,
 
@@ -281,6 +282,7 @@ module ooo_backend (
 		.mem_issue, .mem_uop, .mem_addr, .mem_data,
 		.o_accept             (lsq_accept),
 		.o_load_free          (lsq_load_free),
+		.o_pf_allow           (dc_pf_allow),
 		.o_has_unresolved     (lsq_has_unresolved),
 		.o_oldest_unresolved  (lsq_oldest_unresolved),
 		.rob_head,

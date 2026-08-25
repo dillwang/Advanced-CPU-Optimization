@@ -39,15 +39,23 @@ interface d_cache_input_ifc ();
 endinterface
 
 module d_cache #(
-    parameter INDEX_WIDTH = 8,  // 2 * 4 KB Cache Size
+    parameter INDEX_WIDTH = 8,  // 4 ways x 256 sets x 4 words = 16 KB
     parameter BLOCK_OFFSET_WIDTH = 2,
-    parameter ASSOCIATIVITY = 2
+    parameter ASSOCIATIVITY = 4,
+    // Prefetch degree: how far ahead of the detected stride to fetch.
+    parameter PREFETCH_DEGREE = 1,
+    // Set to 0 to build the same cache with the prefetcher removed, which is
+    // how its contribution is separated from the cache geometry.
+    parameter ENABLE_PREFETCH = 1
     )(
     // General signals
     input clk,    // Clock
     input rst_n,  // Synchronous reset active low
 
-
+    // Asserted by the load/store queue when it is not setting up an access
+    // this cycle. The prefetcher borrows the tag array to probe with, so it
+    // may only do so when no demand access needs it.
+    input logic i_pf_allow,
 
     // Request
     d_cache_input_ifc.in in,
@@ -70,6 +78,8 @@ module d_cache #(
     localparam TAG_WIDTH = `ADDR_WIDTH - INDEX_WIDTH - BLOCK_OFFSET_WIDTH - 2;
     localparam LINE_SIZE = 1 << BLOCK_OFFSET_WIDTH;
     localparam DEPTH = 1 << INDEX_WIDTH;
+    localparam WAY_W = $clog2(ASSOCIATIVITY);
+    localparam LINE_BYTES = LINE_SIZE * 4;
 
     // Check if the parameters are set correctly
     generate
@@ -97,7 +107,8 @@ module d_cache #(
         STATE_FLUSH_REQUEST,    // Sending out memory write request
         STATE_FLUSH_DATA,       // Writes out a dirty cache line
         STATE_REFILL_REQUEST,   // Sending out memory read request
-        STATE_REFILL_DATA       // Loads a cache line from memory
+        STATE_REFILL_DATA,      // Loads a cache line from memory
+        STATE_PF_PROBE          // Looking up a prefetch candidate in the tags
     } state, next_state;
     logic pending_write_response;
 
@@ -113,9 +124,26 @@ module d_cache #(
     logic [INDEX_WIDTH - 1 : 0] databank_raddr;
     logic [`DATA_WIDTH - 1 : 0] databank_rdata [ASSOCIATIVITY][LINE_SIZE];
 
-    logic select_way;
-    logic r_select_way;
-    logic [DEPTH - 1 : 0] lru_rp;
+    logic [WAY_W - 1 : 0] select_way;
+    logic [WAY_W - 1 : 0] r_select_way;
+    // True LRU. lru_age holds a permutation of 0..ASSOCIATIVITY-1 per set: 0 is
+    // most recently used and ASSOCIATIVITY-1 is the victim. The single bit per
+    // set that the two-way version used is only correct for two ways.
+    logic [WAY_W - 1 : 0] lru_age [ASSOCIATIVITY][DEPTH];
+
+    // ---- prefetcher ----
+    // Stride is detected on the miss stream rather than per load PC, which
+    // needs no extra plumbing and still tracks an array walk: successive misses
+    // of a strided traversal are a constant distance apart.
+    logic [`ADDR_WIDTH - 1 : 0] pf_last_miss;
+    logic signed [`ADDR_WIDTH : 0] pf_last_delta;
+    logic pf_seen_miss;
+    logic pf_stride_ok;
+
+    logic pf_req;                               // a candidate is waiting
+    logic [TAG_WIDTH - 1 : 0] pf_tag;
+    logic [INDEX_WIDTH - 1 : 0] pf_index;
+    logic is_prefetch;                          // current refill is a prefetch
 
     // databanks
     genvar g,w;
@@ -178,37 +206,56 @@ module d_cache #(
     logic last_flush_word;
     logic last_refill_word;
 
+    logic [WAY_W - 1 : 0] hit_way;
+    logic [WAY_W - 1 : 0] victim_way;
+
     always_comb
     begin
-        tag_hit = ( ((i_tag == tagbank_rdata[0]) & valid_bits[0][i_index])
-                  | ((i_tag == tagbank_rdata[1]) & valid_bits[1][i_index]));
-        hit = in.valid
-            & (tag_hit)
-            & (state == STATE_READY);
+        tag_hit = 1'b0;
+        hit_way = '0;
+        for (int w = 0; w < ASSOCIATIVITY; w++)
+        begin
+            if ((i_tag == tagbank_rdata[w]) && valid_bits[w][i_index])
+            begin
+                tag_hit = 1'b1;
+                hit_way = WAY_W'(w);
+            end
+        end
+
+        // An invalid way is always the best victim; otherwise take the way the
+        // recency permutation marks as oldest.
+        victim_way = '0;
+        begin
+            automatic logic found_invalid = 1'b0;
+            for (int w = ASSOCIATIVITY - 1; w >= 0; w--)
+            begin
+                if (!valid_bits[w][i_index])
+                begin
+                    found_invalid = 1'b1;
+                    victim_way = WAY_W'(w);
+                end
+            end
+            if (!found_invalid)
+            begin
+                for (int w = 0; w < ASSOCIATIVITY; w++)
+                begin
+                    if (lru_age[w][i_index] == WAY_W'(ASSOCIATIVITY - 1))
+                        victim_way = WAY_W'(w);
+                end
+            end
+        end
+
+        hit = in.valid & tag_hit & (state == STATE_READY);
         miss = in.valid & ~hit;
         last_flush_word = databank_select[LINE_SIZE - 1] & mem_write_data.WVALID;
         last_refill_word = databank_select[LINE_SIZE - 1] & mem_read_data.RVALID;
 
         if (hit)
-        begin
-            if (i_tag == tagbank_rdata[0])
-            begin
-                select_way = 'b0;
-            end
-            else
-            begin
-                select_way = 'b1;
-            end
-        end
+            select_way = hit_way;
         else if (miss)
-        begin
-            select_way = lru_rp[i_index];
-        end
+            select_way = victim_way;
         else
-        begin
-            select_way = 'b0;
-        end
-
+            select_way = '0;
     end
 
     always_comb
@@ -257,6 +304,12 @@ module d_cache #(
             else
                 databank_raddr = i_index_next;
         end
+        else if (state == STATE_PF_PROBE)
+        begin
+            databank_wdata = in.data;
+            databank_waddr = i_index;
+            databank_raddr = i_index_next;
+        end
         else
         begin
             databank_wdata = mem_read_data.RDATA;
@@ -270,17 +323,67 @@ module d_cache #(
 
     always_comb
     begin
+        for (int w = 0; w < ASSOCIATIVITY; w++)
+            tagbank_we[w] = 1'b0;
         tagbank_we[r_select_way] = last_refill_word;
-        tagbank_we[~r_select_way] = '0;
         tagbank_wdata = r_tag;
         tagbank_waddr = r_index;
-        tagbank_raddr = i_index_next;
+        // While idle the tag array is lent to the prefetcher so it can find out
+        // whether its candidate line is already cached. It is handed straight
+        // back in the probe cycle, so a demand access loses at most one cycle.
+        if ((state == STATE_READY) && pf_probe_start)
+            tagbank_raddr = pf_index;
+        else
+            tagbank_raddr = i_index_next;
     end
 
     always_comb
     begin
         out.valid = hit;
         out.data = databank_rdata[select_way][i_block_offset];
+    end
+
+    // A prefetch may only borrow the tag array when the load/store queue says
+    // it is not setting an access up, and only when one is actually waiting.
+    logic pf_probe_start;
+    assign pf_probe_start = (ENABLE_PREFETCH != 0) & pf_req & i_pf_allow & ~in.valid;
+
+    // Evaluated in STATE_PF_PROBE, against the tags read during STATE_READY.
+    logic pf_present;
+    logic [WAY_W - 1 : 0] pf_victim;
+    logic pf_victim_dirty;
+
+    always_comb
+    begin
+        pf_present = 1'b0;
+        for (int w = 0; w < ASSOCIATIVITY; w++)
+        begin
+            if ((pf_tag == tagbank_rdata[w]) && valid_bits[w][pf_index])
+                pf_present = 1'b1;
+        end
+
+        pf_victim = '0;
+        begin
+            automatic logic found_invalid = 1'b0;
+            for (int w = ASSOCIATIVITY - 1; w >= 0; w--)
+            begin
+                if (!valid_bits[w][pf_index])
+                begin
+                    found_invalid = 1'b1;
+                    pf_victim = WAY_W'(w);
+                end
+            end
+            if (!found_invalid)
+            begin
+                for (int w = 0; w < ASSOCIATIVITY; w++)
+                begin
+                    if (lru_age[w][pf_index] == WAY_W'(ASSOCIATIVITY - 1))
+                        pf_victim = WAY_W'(w);
+                end
+            end
+        end
+        pf_victim_dirty = valid_bits[pf_victim][pf_index]
+            & dirty_bits[pf_victim][pf_index];
     end
 
     always_comb
@@ -293,6 +396,17 @@ module d_cache #(
                         next_state = STATE_FLUSH_REQUEST;
                     else
                         next_state = STATE_REFILL_REQUEST;
+                else if (pf_probe_start)
+                    next_state = STATE_PF_PROBE;
+
+            STATE_PF_PROBE:
+                // Take the candidate only if it is absent and would not evict a
+                // dirty line. Writing back on behalf of a guess is not worth a
+                // second memory transaction.
+                if (!pf_present && !pf_victim_dirty)
+                    next_state = STATE_REFILL_REQUEST;
+                else
+                    next_state = STATE_READY;
 
             STATE_FLUSH_REQUEST:
                 if (mem_write_address.AWREADY)
@@ -309,6 +423,8 @@ module d_cache #(
             STATE_REFILL_DATA:
                 if (last_refill_word)
                     next_state = STATE_READY;
+
+            default: ;
         endcase
     end
 
@@ -351,8 +467,15 @@ module d_cache #(
             databank_select <= 1;
             for (int i=0; i<ASSOCIATIVITY;i++)
                 valid_bits[i] <= '0;
-            for (int i=0; i<DEPTH;i++)
-                lru_rp[i] <= 0;
+            // Blocking: large arrays, and nothing else writes them on this edge.
+            // Seeding with the identity gives a valid starting permutation.
+            for (int w = 0; w < ASSOCIATIVITY; w++)
+                for (int i = 0; i < DEPTH; i++)
+                    lru_age[w][i] = WAY_W'(w);
+            pf_req <= 1'b0;
+            is_prefetch <= 1'b0;
+            pf_seen_miss <= 1'b0;
+            pf_stride_ok <= 1'b0;
         end
         else
         begin
@@ -366,13 +489,68 @@ module d_cache #(
                         r_tag <= i_tag;
                         r_index <= i_index;
                         r_select_way <= select_way;
+                        is_prefetch <= 1'b0;
+
+                        // ---- stride detection on the miss stream ----
+                        begin
+                            automatic logic signed [`ADDR_WIDTH : 0] delta =
+                                $signed({1'b0, in.addr}) - $signed({1'b0, pf_last_miss});
+                            automatic logic use_stride = pf_seen_miss && pf_stride_ok
+                                && (delta == pf_last_delta) && (delta != 0);
+                            automatic logic [`ADDR_WIDTH - 1 : 0] target =
+                                use_stride
+                                ? (in.addr + delta[`ADDR_WIDTH - 1 : 0])
+                                : (in.addr + `ADDR_WIDTH'(LINE_BYTES));
+
+                            pf_stride_ok <= pf_seen_miss && (delta == pf_last_delta) && (delta != 0);
+                            pf_last_delta <= delta;
+                            pf_last_miss <= in.addr;
+                            pf_seen_miss <= 1'b1;
+
+                            // Only worth chasing if it lands on a different line.
+                            if (target[`ADDR_WIDTH - 1 : BLOCK_OFFSET_WIDTH + 2]
+                                != in.addr[`ADDR_WIDTH - 1 : BLOCK_OFFSET_WIDTH + 2])
+                            begin
+                                pf_req <= 1'b1;
+                                {pf_tag, pf_index} <=
+                                    target[`ADDR_WIDTH - 1 : BLOCK_OFFSET_WIDTH + 2];
+                            end
+                        end
                     end
-                    else if (in.mem_action == WRITE)
+                    else if (hit && (in.mem_action == WRITE))
                         dirty_bits[select_way][i_index] <= 1'b1;
+
+                    // Promote the accessed way to most recently used.
                     if (in.valid)
                     begin
-                        lru_rp[i_index] <= ~select_way;
+                        for (int w = 0; w < ASSOCIATIVITY; w++)
+                        begin
+                            if (lru_age[w][i_index] < lru_age[select_way][i_index])
+                                lru_age[w][i_index] <= lru_age[w][i_index] + WAY_W'(1);
+                        end
+                        lru_age[select_way][i_index] <= '0;
                     end
+                end
+
+                STATE_PF_PROBE:
+                begin
+                    // The candidate is consumed either way: taken, or dropped
+                    // because it is already cached or would evict dirty data.
+                    pf_req <= 1'b0;
+                    if (!pf_present && !pf_victim_dirty)
+                    begin
+                        r_tag <= pf_tag;
+                        r_index <= pf_index;
+                        r_select_way <= pf_victim;
+                        is_prefetch <= 1'b1;
+                    `ifdef SIMULATION
+                        stats_event("D-Prefetch_issued");
+                    `endif
+                    end
+                `ifdef SIMULATION
+                    else if (pf_present) stats_event("D-Prefetch_already_cached");
+                    else stats_event("D-Prefetch_dropped_dirty");
+                `endif
                 end
 
                 STATE_FLUSH_DATA:
@@ -392,6 +570,19 @@ module d_cache #(
                     begin
                         valid_bits[r_select_way][r_index] <= 1'b1;
                         dirty_bits[r_select_way][r_index] <= 1'b0;
+                        is_prefetch <= 1'b0;
+                        // A prefetched line is inserted as least recently used
+                        // rather than most: it is a guess, and inserting it at
+                        // MRU would let a wrong guess evict live data.
+                        if (is_prefetch)
+                        begin
+                            for (int w = 0; w < ASSOCIATIVITY; w++)
+                            begin
+                                if (lru_age[w][r_index] > lru_age[r_select_way][r_index])
+                                    lru_age[w][r_index] <= lru_age[w][r_index] - WAY_W'(1);
+                            end
+                            lru_age[r_select_way][r_index] <= WAY_W'(ASSOCIATIVITY - 1);
+                        end
                     end
                 end
             endcase

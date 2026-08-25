@@ -43,6 +43,7 @@ module lsq (
 	// ---- constraints published back to the issue queue ----
 	output logic o_accept,
 	output logic o_load_free,
+	output logic o_pf_allow,
 	output logic o_has_unresolved,
 	output rob_idx_t o_oldest_unresolved,
 	input  rob_idx_t rob_head,
@@ -180,6 +181,10 @@ module lsq (
 	// A load can only be set up when nothing else is claiming the port, since
 	// the cache SRAM has to be addressed a cycle in advance.
 	assign o_load_free = (state == M_IDLE) && !st_valid;
+	// The D-cache prefetcher borrows the tag array while nothing else needs it.
+	// It may only do so when no access is being set up, because a request is
+	// presented to the cache one cycle after its address appears on addr_next.
+	assign o_pf_allow = (state == M_IDLE) && !st_valid && !start_load && !mem_issue;
 
 	always_comb
 	begin

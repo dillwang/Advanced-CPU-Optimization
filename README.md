@@ -204,16 +204,18 @@ the harness itself: `verilator_main.cpp` diffs every committed pc, write-back an
 against the golden traces in `hexfiles/`, and aborts on the first mismatch. **All benchmarks below
 run to completion with all three streams matching.**
 
-Cycle counts, lower is better. Instruction counts are identical across all configurations
-(1,015,298 / 4,103,867 / 7,854,693), so cycles and CPI carry all the information.
+Cycle counts, lower is better. Instruction counts match the baseline exactly on every benchmark,
+so cycles and CPI carry all the information.
 
-| benchmark | baseline (in-order) | out-of-order core | + 8 KB caches | total speedup |
-| --- | --- | --- | --- | --- |
-| nqueens   | 1,722,402 | 1,609,896 | **890,282** | **1.93×** |
-| quickSort | 9,572,553 | 7,740,489 | **6,233,906** | **1.54×** |
-| esift2    | 21,375,975 | 17,254,324 | **14,431,835** | **1.48×** |
+| benchmark | baseline (in-order) | out-of-order core | **final** | speedup | IPC |
+| --- | --- | --- | --- | --- | --- |
+| nqueens   | 1,722,402  | 1,609,896  | **890,370**    | **1.93×** | 1.14 |
+| quickSort | 9,572,553  | 7,740,489  | **5,492,808**  | **1.74×** | 0.75 |
+| esift2    | 21,375,975 | 17,254,324 | **5,814,714**  | **3.68×** | 1.35 |
+| coin      | 35,944,392 | —          | **34,162,087** | **1.05×** | 1.05 |
 
-IPC in the final configuration: **1.14 / 0.66 / 0.54**, against 0.59 / 0.43 / 0.37 for the baseline.
+Geometric mean **1.90×**. The middle column is the out-of-order core at the original 2 KB caches;
+the final column adds 8 KB instruction cache and a 4-way 16 KB data cache.
 
 ### Where the time goes
 
@@ -239,46 +241,43 @@ That is the whole story of this design. The out-of-order core roughly halves the
 the workload and can do nothing at all about the memory half, so what each benchmark gains depends
 entirely on its mix.
 
-### Cache capacity
+### Cache capacity and associativity
 
-Both caches were 2 KB. Raising each to 8 KB (`INDEX_WIDTH` 6 → 8) is a one-line change per cache
-and is worth as much as the entire out-of-order back end:
+The caches turned out to be worth more than the entire out-of-order back end. Each change below is
+a parameter, measured on top of the design as it stood:
 
 | change | benchmark | before | after | gain |
 | --- | --- | --- | --- | --- |
-| D-cache 2 KB → 8 KB | quickSort | 7,740,489 | 6,233,906 | 1.24× |
+| I-cache 2 KB -> 8 KB | nqueens | 1,609,772 | 890,282 | **1.81×** |
+| D-cache 2 KB -> 8 KB | quickSort | 7,740,489 | 6,233,906 | 1.24× |
 | | esift2 | 17,254,324 | 14,431,835 | 1.20× |
-| I-cache 2 KB → 8 KB | nqueens | 1,609,772 | 890,282 | **1.81×** |
+| D-cache 2-way 8 KB -> 4-way 16 KB, true LRU | quickSort | 6,233,906 | 5,492,808 | 1.13× |
+| | esift2 | 14,431,835 | **5,814,714** | **2.48×** |
 
-nqueens' I-cache miss cycles fall from 742,759 to 16,807 — a 44× reduction, which says those were
-pure capacity misses: the instruction working set fits in 8 KB and does not fit in 2 KB. This is
-also the only configuration in which the machine exceeds IPC 1.0.
+esift2's D-cache miss cycles fall from 9,754,499 to 85,357, a **114× reduction**; nqueens'
+I-cache miss cycles fall from 742,759 to 16,807, a 44× reduction. Both were capacity and conflict
+misses, and in both cases the working set crossed a cliff rather than improving gradually.
 
-### What the instruction window is worth
+The replacement policy had to change with the associativity. The original single `lru_rp` bit per
+set is exact LRU for two ways and meaningless for four, so it is now a per-set recency permutation
+(`lru_age`) with invalid ways preferred as victims.
 
-Almost nothing, and the measurement is worth keeping because the intuition points the other way.
-`rename_stall` sits at 60% of cycles on esift2, which looks like a window that is too small. It is
-not: it is the reorder buffer filling up behind a commit blocked by a D-cache miss.
+### What the prefetchers are worth
 
-| esift2 | cycles | D-cache miss cycles | IPC on the non-stall part |
-| --- | --- | --- | --- |
-| shipped (PRF 64, ROB 64, IQ 32, LSQ 16) | 14,431,835 | 9,754,499 | 1.68 |
-| PRF 128 + LSQ 32 | 14,106,059 | 9,754,498 | 1.81 |
-| everything doubled | 14,035,453 | 9,754,499 | 1.84 |
+Nothing measurable, on either side of the machine. This is the clearest negative result here and
+worth stating plainly.
 
-Doubling the whole window buys **2.8%** on esift2 and **0.08%** on quickSort, for twice the area in
-four structures. The D-cache miss cycles are identical to the digit across all three, which is as
-direct a demonstration as one could ask for that the blocking cache sets a floor no window
-parameter can reach. Meanwhile the non-stall portion is already at 92% of the 2-wide ceiling.
+| prefetcher | benchmark | with | without | difference |
+| --- | --- | --- | --- | --- |
+| D-cache stride | quickSort | 5,492,808 | 5,496,366 | 0.065% |
+| | esift2 | 5,814,714 | 5,814,715 | 1 cycle |
 
-The conclusion for anyone continuing this work: **the next real gain is a non-blocking D-cache with
-miss status holding registers**, not a wider machine. `memory.h` already permits four outstanding
-reads per master id, which is the mechanism the instruction prefetcher uses.
+The instruction-side stream buffer records 162 hits on nqueens against 16,641 misses.
 
-Note that `ROB_ENTRIES` above 64 does not elaborate as written — Verilator rejects delayed
-assignment to an unpacked array element inside a large loop. The fix is to hoist the per-entry
-`valid`/`executed` bits into packed vectors; it is not applied here, since the payoff above does
-not justify touching the verified commit and squash paths.
+Both are correctly implemented and both pipeline their requests, and neither earns its area,
+because these benchmarks miss on capacity and conflicts rather than on predictable address
+streams. Once the caches were sized properly there was almost nothing left to predict. The D-cache
+prefetcher can be compiled out with `ENABLE_PREFETCH = 0`.
 
 ### Branch prediction accuracy
 
@@ -300,10 +299,40 @@ enlarging the cache addressed them completely. The implementation is correct and
 pipelined, but it does not earn its area as built. The misses that remain are on the **data** side,
 which is where a stride prefetcher would belong.
 
-`coin` is not included: `hexfiles/coin.ls.txt.bz2` is truncated in this repository and cannot be
-decompressed, so its load/store stream cannot be checked.
+All four benchmarks are checkable. If `coin.ls.txt.bz2` ever fails to decompress, the archive in
+git is intact (md5 `ddb5e9b2a81ebcb95dee219cfebedb1b`) and the working-tree copy has gone bad —
+`rm hexfiles/coin.ls.txt.bz2 && git checkout -- hexfiles/coin.ls.txt.bz2` restores it. Note that
+coin is far larger than the others (35.7 M instructions against 7.9 M for esift2) and takes
+correspondingly longer to simulate.
 
 ---
+
+### Where the remaining time goes
+
+With the caches fixed the bottleneck moved, and it is now different on each benchmark:
+
+| benchmark | IPC (ceiling 2.0) | D-cache miss | I-cache miss | limited by |
+| --- | --- | --- | --- | --- |
+| esift2 | 1.35 | 1.5% | 0.04% | the core |
+| nqueens | 1.14 | 1.2% | 1.9% | front end and branches |
+| coin | 1.05 | 0.01% | 0.009% | the core |
+| quickSort | 0.75 | 45% | 0.09% | memory |
+
+coin is the most useful diagnostic in the suite: it has essentially no cache misses at all and
+still only reaches IPC 1.05, so it measures what the core alone is leaving on the table. Note the
+in-order baseline runs coin at IPC 0.995, i.e. at 99.5% of *its* ceiling, which is why the
+out-of-order machine only gains 1.05× there.
+
+A concrete suspect, stated as a hypothesis rather than a conclusion: the load/store queue walks
+every access through `M_IDLE -> M_LOAD -> M_IDLE`, because the D-cache SRAM must be addressed via
+`addr_next` one cycle before `addr`. That means even a cache **hit** occupies the memory port for
+two cycles, capping memory throughput at 0.5 accesses per cycle. coin's instruction mix is 31.1%
+memory operations, so that cap alone limits it to IPC 1.61, and it achieves 1.05. The D-cache is a
+one-cycle-hit design and could accept an address every cycle; the round trip through idle is an
+artifact of the queue, not of the cache. Pipelining it is the most promising core-side change.
+
+Cheap way to confirm before building it: count cycles in which the issue queue holds a ready memory
+operation while `lsq_load_free` is low.
 
 # Simulation
 

@@ -205,7 +205,8 @@ module rename_rob (
 	logic [FE_WIDTH - 1 : 0] commit_en;
 	logic [ROB_IDX_W : 0] n_commit;
 	rob_idx_t commit_idx [FE_WIDTH];
-	logic commit_ok, saw_branch;
+	logic commit_ok, saw_branch, saw_done;
+	logic halted;
 	rob_entry_t ch;		// the entry at the head, for the store request
 
 	assign ch = rob[rob_head];
@@ -219,11 +220,13 @@ module rename_rob (
 		n_commit = '0;
 		commit_ok = 1'b1;
 		saw_branch = 1'b0;
+		saw_done = 1'b0;
 
 		for (int k = 0; k < FE_WIDTH; k++)
 		begin
 			automatic rob_idx_t idx = rob_idx_t'(rob_head + ROB_IDX_W'(k));
-			automatic logic can = commit_ok && ({1'b0, ROB_IDX_W'(k)} < rob_count)
+			automatic logic can = commit_ok && !halted
+				&& ({1'b0, ROB_IDX_W'(k)} < rob_count)
 				&& rob[idx].valid && rob[idx].executed;
 
 			commit_idx[k] = idx;
@@ -241,12 +244,20 @@ module rename_rob (
 			if (can && red_hit && ({1'b0, ROB_IDX_W'(k)} > red_age + 1))
 				can = 1'b0;
 
+			// Nothing retires behind MTC0_DONE. The program has ended, and
+			// letting whatever happened to be queued behind it retire would
+			// put extra events on the end of the trace.
+			if (can && saw_done)
+				can = 1'b0;
+
 			if (can)
 			begin
 				commit_en[k] = 1'b1;
 				n_commit = n_commit + 1'b1;
 				if (rob[idx].is_branch)
 					saw_branch = 1'b1;
+				if (rob[idx].is_done)
+					saw_done = 1'b1;
 			end
 			else
 				commit_ok = 1'b0;
@@ -448,16 +459,16 @@ module rename_rob (
 			busy <= '0;
 			rob_head <= '0;
 			rob_count <= '0;
+			done <= 1'b0;
+			halted <= 1'b0;
 			for (int i = 0; i < ROB_ENTRIES; i++)
 			begin
 				rob[i].valid <= 1'b0;
 				rob[i].executed <= 1'b0;
 			end
-			done <= 1'b0;
 		end
 		else
 		begin
-			done <= 1'b0;
 
 			// ---- 1. writeback ----
 			for (int i = 0; i < NUM_WB; i++)
@@ -485,6 +496,15 @@ module rename_rob (
 					rob[ci].valid <= 1'b0;
 					rob[ci].executed <= 1'b0;
 
+					if (rob[ci].is_done)
+					begin
+						// Report done one edge later, so this instruction's own
+						// events are raised first, and latch the halt so nothing
+						// retires in the meantime.
+						done <= 1'b1;
+						halted <= 1'b1;
+					end
+
 					if (rob[ci].uses_rw && (rob[ci].old_pd != PREG_ZERO))
 					begin
 						// The previous mapping is dead once this one commits.
@@ -493,8 +513,6 @@ module rename_rob (
 						freed_pregs = freed_pregs + 1'b1;
 					end
 
-					if (rob[ci].is_done)
-						done <= 1'b1;
 				end
 			end
 

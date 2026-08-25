@@ -104,6 +104,7 @@ module mips_core (
 	mips_core_pkg::BranchOutcome rec_outcome;
 
 	// |||| Memory
+	logic mem_d_cache_pf_allow;
 	d_cache_input_ifc mem_d_cache_input();
 	cache_output_ifc mem_d_cache_output();
 
@@ -218,6 +219,7 @@ module mips_core (
 		.fb_perc, .fb_gshare, .fb_outcome,
 		.rec_valid, .rec_hist, .rec_shift, .rec_outcome,
 
+		.dc_pf_allow (mem_d_cache_pf_allow),
 		.dc_in  (mem_d_cache_input),
 		.dc_out (mem_d_cache_output),
 
@@ -226,6 +228,8 @@ module mips_core (
 
 	d_cache D_CACHE (
 		.clk, .rst_n,
+
+		.i_pf_allow(mem_d_cache_pf_allow),
 
 		.in(mem_d_cache_input),
 		.out(mem_d_cache_output),
