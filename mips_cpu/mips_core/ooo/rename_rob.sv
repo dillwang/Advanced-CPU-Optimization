@@ -60,6 +60,13 @@ module rename_rob (
 	input  logic [`ADDR_WIDTH - 1 : 0] wb_mem_addr [NUM_WB],
 	input  logic [`DATA_WIDTH - 1 : 0] wb_mem_data [NUM_WB],
 
+	// ---- memory order violation from the load/store queue ----
+	// This load read a word an older store is about to write. It has to be
+	// squashed along with everything after it, unlike a mispredicted branch,
+	// which survives its own recovery.
+	input  logic mv_valid,
+	input  rob_idx_t mv_rob_idx,
+
 	// ---- squash broadcast to the issue queue and load/store queue ----
 	// An entry dies when ((its rob_idx - squash_head) & mask) >= squash_count.
 	output logic squash,
@@ -137,6 +144,7 @@ module rename_rob (
 
 		logic is_mem;
 		logic is_store;
+		logic is_ctrl;			// the next entry is this one's delay slot
 		logic is_done;
 		logic [`ADDR_WIDTH - 1 : 0] mem_addr;
 
@@ -156,23 +164,41 @@ module rename_rob (
 	assign rob_count_o = rob_count;
 
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+	// |||| Memory dependence predictor
+	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+	// One bit per load pc. Set when that load is caught reading a word an older
+	// store had not addressed yet; read at dispatch, and a load whose bit is set
+	// waits for every older store instead of guessing. It lives here because
+	// this is the module that sees both dispatch and the violation.
+	//
+	// A packed vector rather than an array of bits, so that clearing it is a
+	// single assignment and Verilator does not have to unroll a reset loop.
+	logic [MDP_ENTRIES - 1 : 0] mdp;
+	logic [MDP_CLEAR_W - 1 : 0] mdp_timer;
+
+	function automatic logic [MDP_IDX_W - 1 : 0] mdp_index
+		(input logic [`ADDR_WIDTH - 1 : 0] pc);
+		return pc[MDP_IDX_W + 1 : 2];
+	endfunction
+
+	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 	// |||| Misprediction detection
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 	// Several branches can resolve in one cycle. The oldest one wins, because a
 	// younger branch on the wrong path is about to be squashed anyway.
-	logic red_hit;
-	logic [ROB_IDX_W : 0] red_age;
-	rob_idx_t red_idx;
-	logic [`ADDR_WIDTH - 1 : 0] red_pc;
-	mips_core_pkg::BranchOutcome red_outcome;
+	logic b_hit;
+	logic [ROB_IDX_W : 0] b_age;
+	rob_idx_t b_idx;
+	logic [`ADDR_WIDTH - 1 : 0] b_pc;
+	mips_core_pkg::BranchOutcome b_outcome;
 
 	always_comb
 	begin
-		red_hit = 1'b0;
-		red_age = '0;
-		red_idx = '0;
-		red_pc = '0;
-		red_outcome = NOT_TAKEN;
+		b_hit = 1'b0;
+		b_age = '0;
+		b_idx = '0;
+		b_pc = '0;
+		b_outcome = NOT_TAKEN;
 
 		for (int i = 0; i < NUM_WB; i++)
 		begin
@@ -180,23 +206,88 @@ module rename_rob (
 				{1'b0, rob_idx_t'(wb_rob_idx[i] - rob_head)};
 			if (wb_valid[i] && wb_redirect[i])
 			begin
-				if (!red_hit || (cand_age < red_age))
+				if (!b_hit || (cand_age < b_age))
 				begin
-					red_hit = 1'b1;
-					red_age = cand_age;
-					red_idx = wb_rob_idx[i];
-					red_pc = wb_target[i];
-					red_outcome = wb_outcome[i];
+					b_hit = 1'b1;
+					b_age = cand_age;
+					b_idx = wb_rob_idx[i];
+					b_pc = wb_target[i];
+					b_outcome = wb_outcome[i];
 				end
 			end
 		end
 	end
 
-	// The branch and its delay slot both survive, so the first squashed entry
-	// is two past the branch.
+	// A memory order violation is anchored differently. The load itself has to
+	// die, so recovery re-fetches from its own pc rather than from a target --
+	// unless the load is a delay slot, in which case its pc is not reachable on
+	// its own (control only arrives there through the branch, and fetching from
+	// it would run on to pc + 4 instead of the branch target). Anchor on the
+	// branch instead; re-executing it is harmless.
+	logic v_hit;
+	logic [ROB_IDX_W : 0] v_age;
+	rob_idx_t v_idx;
+
+	always_comb
+	begin
+		automatic logic [ROB_IDX_W : 0] l_age =
+			{1'b0, rob_idx_t'(mv_rob_idx - rob_head)};
+		automatic rob_idx_t prev = rob_idx_t'(mv_rob_idx - 1'b1);
+
+		// The violation was detected a cycle ago. If the load has been squashed
+		// since, by an older branch, there is nothing left to do.
+		v_hit = mv_valid && rob[mv_rob_idx].valid;
+
+		if (v_hit && (l_age != 0) && rob[prev].valid && rob[prev].is_ctrl)
+		begin
+			v_age = l_age - 1'b1;
+			v_idx = prev;
+		end
+		else
+		begin
+			v_age = l_age;
+			v_idx = mv_rob_idx;
+		end
+	end
+
+	// Whichever squashes more wins. A branch keeps itself and its delay slot,
+	// so its first squashed entry is two past it; a violation squashes from its
+	// anchor onwards.
+	logic red_hit;
+	logic red_self;				// the anchor entry is squashed too
+	logic [ROB_IDX_W : 0] red_age;
+	rob_idx_t red_idx;
+	logic [`ADDR_WIDTH - 1 : 0] red_pc;
+	logic [ROB_IDX_W : 0] red_count;
+	mips_core_pkg::BranchOutcome red_outcome;
+
+	always_comb
+	begin
+		red_hit = b_hit || v_hit;
+
+		if (b_hit && (!v_hit || ((b_age + 2) <= v_age)))
+		begin
+			red_self = 1'b0;
+			red_age = b_age;
+			red_idx = b_idx;
+			red_pc = b_pc;
+			red_outcome = b_outcome;
+			red_count = b_age + 2;
+		end
+		else
+		begin
+			red_self = 1'b1;
+			red_age = v_age;
+			red_idx = v_idx;
+			red_pc = rob[v_idx].pc;
+			red_outcome = NOT_TAKEN;
+			red_count = v_age;
+		end
+	end
+
 	assign squash = red_hit;
 	assign squash_head = rob_head;
-	assign squash_count = red_age + 2;
+	assign squash_count = red_count;
 	assign redirect_valid = red_hit;
 	assign redirect_pc = red_pc;
 
@@ -240,9 +331,9 @@ module rename_rob (
 			if (can && rob[idx].is_branch && rob[idx].bp_valid && saw_branch)
 				can = 1'b0;
 
-			// Never retire past the delay slot of a branch that is redirecting
-			// this cycle -- everything after it is wrong path.
-			if (can && red_hit && ({1'b0, ROB_IDX_W'(k)} > red_age + 1))
+			// Nothing inside the squash range may retire; everything there is
+			// wrong path.
+			if (can && red_hit && ({1'b0, ROB_IDX_W'(k)} >= red_count))
 				can = 1'b0;
 
 			// Nothing retires behind MTC0_DONE. The program has ended, and
@@ -316,7 +407,10 @@ module rename_rob (
 	// only written on this same clock edge.
 	assign rec_valid = red_hit;
 	assign rec_hist = rob[red_idx].bp_hist;
-	assign rec_shift = rob[red_idx].is_branch & rob[red_idx].bp_valid;
+	// A branch that survives its own recovery still shifts its real outcome
+	// into the history. An anchor that is itself squashed does not: it is about
+	// to be fetched and predicted again.
+	assign rec_shift = rob[red_idx].is_branch & rob[red_idx].bp_valid & ~red_self;
 	assign rec_outcome = red_outcome;
 
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -414,6 +508,7 @@ module rename_rob (
 				disp_uop[k].is_branch = fe_uop[k].is_branch_jump
 					& ~fe_uop[k].is_jump;
 				disp_uop[k].is_jump_reg = fe_uop[k].is_jump_reg;
+				disp_uop[k].is_ctrl = fe_uop[k].is_branch_jump;
 				disp_uop[k].prediction = fe_uop[k].prediction;
 				disp_uop[k].recovery_target = fe_uop[k].recovery_target;
 				disp_uop[k].seq_target = fe_uop[k].pc + `ADDR_WIDTH'd8;
@@ -426,6 +521,7 @@ module rename_rob (
 
 				disp_uop[k].is_mem = fe_uop[k].is_mem_access;
 				disp_uop[k].mem_action = fe_uop[k].mem_action;
+				disp_uop[k].mem_wait = mdp[mdp_index(fe_uop[k].pc)];
 				disp_uop[k].is_done = (fe_uop[k].alu_ctl == ALUCTL_MTC0_DONE);
 
 				disp_uop[k].rob_idx = rob_idx_t'(rob_head + rob_count[ROB_IDX_W - 1 : 0]
@@ -464,6 +560,8 @@ module rename_rob (
 			fl_count <= PHYS_REGS - ARCH_REGS;
 
 			busy <= '0;
+			mdp <= '0;
+			mdp_timer <= '0;
 			rob_head <= '0;
 			rob_count <= '0;
 			done <= 1'b0;
@@ -476,6 +574,16 @@ module rename_rob (
 		end
 		else
 		begin
+
+			// ---- 0. memory dependence predictor ----
+			// Cleared periodically so that a bit set by an aliasing pc, or by a
+			// phase of the program that has ended, does not disable that load
+			// for the rest of the run. The set below wins over the clear.
+			mdp_timer <= mdp_timer + 1'b1;
+			if (mdp_timer == '0)
+				mdp <= '0;
+			if (v_hit)
+				mdp[mdp_index(rob[mv_rob_idx].pc)] <= 1'b1;
 
 			// ---- 1. writeback ----
 			for (int i = 0; i < NUM_WB; i++)
@@ -552,6 +660,7 @@ module rename_rob (
 						rob[di].is_mem <= disp_uop[k].is_mem;
 						rob[di].is_store <= disp_uop[k].is_mem
 							& (disp_uop[k].mem_action == WRITE);
+						rob[di].is_ctrl <= disp_uop[k].is_ctrl;
 						rob[di].is_done <= disp_uop[k].is_done;
 						rob[di].result <= '0;
 
@@ -694,6 +803,9 @@ module rename_rob (
 			end
 
 			if (squash) stats_event("mispredict");
+			if (v_hit) stats_event("memdep_violation");
+			if (v_hit && (v_idx != mv_rob_idx)) stats_event("memdep_delayslot");
+			if (mv_valid && !rob[mv_rob_idx].valid) stats_event("memdep_stale");
 			if (fe_stall) stats_event("rename_stall");
 		end
 	end

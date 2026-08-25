@@ -10,6 +10,7 @@ Implemented:
 - Superscalar out-of-order execution
 - Branch target buffer, so prediction happens in fetch rather than decode
 - Non-blocking data cache with miss status holding registers
+- Memory dependence speculation, with a predictor and a stress-tested recovery path
 - Next-line hardware prefetching with a stream buffer
 
 Every number in this README was measured with the simulator on this repository. See
@@ -62,7 +63,7 @@ instruction can therefore never be observed.
 | `ooo/btb.sv` | Branch target buffer: what makes prediction in fetch possible |
 | `ooo/rename_rob.sv` | Register map, free list, busy table, reorder buffer, commit, recovery |
 | `ooo/issue_queue.sv` | The instruction window: wakeup and oldest-first select |
-| `ooo/lsq.sv` | Load/store queue, disambiguation, store-to-load forwarding, D-cache port |
+| `ooo/lsq.sv` | Load/store queue, disambiguation, store-to-load forwarding, memory order violation detection, D-cache port |
 | `ooo/prf.sv` | Unified physical register file |
 | `ooo/ooo_backend.sv` | Back-end glue and the execution units |
 | `branch_predictor_files/tournament_predictor.sv` | Perceptron + gshare + chooser |
@@ -203,8 +204,9 @@ rules:
 - Stores never touch the cache speculatively. A store computes its address and data when it issues,
   sits in the queue, and is written to the cache only when the reorder buffer retires it — so a
   squashed store cannot have changed memory.
-- A load may issue ahead of older stores only once every older store has computed its address. At
-  that point it can be disambiguated exactly, so **no replay mechanism is needed**.
+- A load may issue ahead of an older store whose address is not known yet. That is a guess, checked
+  when the store resolves — see [memory dependence
+  speculation](#speculating-on-memory-dependences).
 - A load matching an older store in the queue takes its value straight from the queue
   (**store-to-load forwarding**); the youngest matching older store wins.
 
@@ -231,6 +233,98 @@ in the reorder buffer instead of holding the port for the whole refill.
 
 `jr`/`jalr` targets come out of a register, so they are resolved at execute and redirect through the
 same recovery path as a mispredicted branch. Direct `j`/`jal` are resolved by the front end.
+
+### Speculating on memory dependences
+
+The rule this replaces was the conservative one: a load waits until **every** older store has
+computed its address, and is then disambiguated exactly, so no replay mechanism is ever needed. It
+is correct by construction and it is cheap — except when there is nothing else to run.
+
+Measuring that directly is what justified changing it. Counting the cycles where *nothing at all is
+ready to issue* **and** at least one load has both its operands and is held only by this rule:
+
+| benchmark | a load held by the rule | *and nothing else ready to issue* |
+| --- | --- | --- |
+| quickSort | 991,094 (21.9%) | **854,588 (18.9%)** |
+| coin      | 1,576,494 (6.0%) | **0** |
+| nqueens   | 43,334 (5.7%) | **0** |
+| esift2    | 3,131 (0.1%) | 3 |
+
+The second column is the whole story. coin holds a load 6% of the time and it never costs a cycle,
+because something else is always ready to take the slot. quickSort has nothing else.
+
+**Loads therefore issue past unresolved stores, and the store checks the guess when it resolves.**
+The check has to happen in the cycle the store's address appears, because a load that has already
+issued has already chosen where its data comes from — at issue, from the forwarding search. So when
+a store computes its address, the queue scans for younger loads that already have an address and hit
+the same word. The oldest offender wins; squashing it takes the younger ones with it.
+
+One refinement keeps the check exact rather than merely safe. A load that forwarded from a store
+*younger* than the one resolving now already holds the right value — that younger store is the last
+write to the word before it — so each load records which store it forwarded from, and those are not
+violations.
+
+The violation signal is **registered before it leaves the queue**, and that is not optional: the
+squash it raises reaches the issue queue, which is what produced the store issue that detected it,
+so passing it out combinationally would close a loop. Waiting a cycle costs nothing, because the
+load cannot commit in the meantime — the store that caught it is older and has not committed either.
+
+#### Recovery, and the delay slot
+
+A memory order violation is anchored differently from a mispredicted branch. A branch **survives**
+its own recovery: it and its delay slot are kept and fetch is redirected to the target. A violating
+load must **die**, because its physical register already holds the wrong value, so recovery
+re-fetches from the load's own pc.
+
+Except that a load in a delay slot has no reachable pc of its own. Control only arrives there
+through its branch, and re-fetching from it would run on to pc + 4 instead of the branch target. So
+when the entry before the load is a control transfer, the squash is anchored on the **branch**
+instead, which simply re-executes. This is not a corner case: on nqueens, **20 of 42** forced
+violations took that path.
+
+#### The brake
+
+Left alone, a load that aliases a store would violate on every execution and speculation would cost
+more than it saves. The predictor is one bit per load pc — 1024 entries, set when that load is
+caught, read at dispatch — and a load whose bit is set goes back to waiting for every older store.
+Almost all violations come from a handful of static loads, so one bit each is enough. The table is
+cleared every 65,536 cycles so that an aliasing pc, or a phase that has ended, does not disable a
+load for the whole run.
+
+#### What it is worth
+
+| benchmark | conservative | speculative | gain | speculative loads | violations |
+| --- | --- | --- | --- | --- | --- |
+| quickSort | 4,528,689  | **4,235,844**  | **1.069×** | 22,990 | **0** |
+| nqueens   | 764,041    | 763,961        | 1.000×     | 87     | 0 |
+| esift2    | 4,835,486  | 4,835,486      | 1.000×     | 1      | 1 |
+| coin      | 26,211,879 | 26,212,489     | 1.000×     | 45,309 | 0 |
+
+It is a one-benchmark change, and the idle-cycle count above predicted exactly that. It is worth
+6.9% on quickSort and nothing anywhere else — and on coin, where 45,309 loads do issue
+speculatively, the effect is 610 cycles in 26 M, because unblocking those loads only makes them
+queue up behind an issue width that was already full. `ready_mem_ge2` on coin rises from 7.5% of
+cycles to 12.0%; `issue_0` does not move.
+
+Not one of the four benchmarks produces a violation in normal operation except esift2's single one.
+That is the point — real code does not alias here — but it also means the recovery path would
+otherwise never be tested.
+
+#### Testing a path that never runs
+
+`MDP_STRESS` drops the address comparison, so **every** store that resolves behind an issued load
+reports a violation. The golden traces still have to match:
+
+| benchmark | violations | delay-slot anchored | cycles | trace |
+| --- | --- | --- | --- | --- |
+| nqueens   | 42  | **20** | 764,396   | clean |
+| quickSort | 162 | —      | 4,521,096 | clean |
+| esift2    | 1   | —      | 4,835,486 | clean |
+
+The quickSort row is the useful one for a second reason. Under a pathological violation rate the
+predictor learns to stop speculating — 22,990 speculative loads collapse to 493 — and the cycle
+count returns to 4,521,096 against a conservative 4,528,689. The mechanism degrades to its own
+baseline rather than below it, which is the property that makes speculating here safe to leave on.
 
 ---
 
@@ -349,30 +443,32 @@ run to completion with all three streams matching.**
 Cycle counts, lower is better. Instruction counts match the baseline exactly on every benchmark,
 so cycles and CPI carry all the information.
 
-| benchmark | baseline (in-order) | out-of-order core | + caches | + front end | **final** | speedup | IPC |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| nqueens   | 1,722,402  | 1,609,896  | 890,370    | 807,339    | **764,041**    | **2.25×** | 1.33 |
-| quickSort | 9,572,553  | 7,740,489  | 5,492,808  | 5,240,726  | **4,528,689**  | **2.11×** | 0.91 |
-| esift2    | 21,375,975 | 17,254,324 | 5,814,714  | 4,834,600  | **4,835,486**  | **4.42×** | 1.62 |
-| coin      | 35,944,392 | —          | 34,162,087 | 27,294,090 | **26,211,879** | **1.37×** | 1.36 |
+| benchmark | baseline (in-order) | out-of-order core | + caches | + front end | + non-blocking | **final** | speedup | IPC |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| nqueens   | 1,722,402  | 1,609,896  | 890,370    | 807,339    | 764,041    | **763,961**    | **2.25×** | 1.33 |
+| quickSort | 9,572,553  | 7,740,489  | 5,492,808  | 5,240,726  | 4,528,689  | **4,235,844**  | **2.26×** | 0.97 |
+| esift2    | 21,375,975 | 17,254,324 | 5,814,714  | 4,834,600  | 4,835,486  | **4,835,486**  | **4.42×** | 1.62 |
+| coin      | 35,944,392 | —          | 34,162,087 | 27,294,090 | 26,211,879 | **26,212,489** | **1.37×** | 1.36 |
 
-Geometric mean **2.32×**. The columns are cumulative: the out-of-order core at the original 2 KB
+Geometric mean **2.36×**. The columns are cumulative: the out-of-order core at the original 2 KB
 caches, then 8 KB instruction cache and 4-way 16 KB data cache, then prediction moved into fetch
-with a branch target buffer and the D-cache port pipelined, then the data cache made non-blocking.
+with a branch target buffer and the D-cache port pipelined, then the data cache made non-blocking,
+then loads allowed to speculate past unresolved stores.
 
-The last two columns are worth isolating, because they are the changes that helped every benchmark
-rather than one:
+The last four columns are worth isolating, since they are where the recent work went:
 
-| benchmark | before front end work | + BTB in fetch | + pipelined D-cache port | + non-blocking D-cache | total |
-| --- | --- | --- | --- | --- | --- |
-| nqueens   | 890,370    | 860,124    | 807,349    | **764,041**    | **1.17×** |
-| quickSort | 5,492,808  | 5,273,026  | 5,239,953  | **4,528,689**  | **1.21×** |
-| esift2    | 5,814,714  | 4,834,598  | 4,834,598  | **4,835,486**  | **1.20×** |
-| coin      | 34,162,087 | 28,492,663 | 27,294,122 | **26,211,879** | **1.30×** |
+| benchmark | before front end work | + BTB in fetch | + pipelined D-cache port | + non-blocking D-cache | + memory dependence speculation | total |
+| --- | --- | --- | --- | --- | --- | --- |
+| nqueens   | 890,370    | 860,124    | 807,349    | 764,041    | **763,961**    | **1.17×** |
+| quickSort | 5,492,808  | 5,273,026  | 5,239,953  | 4,528,689  | **4,235,844**  | **1.30×** |
+| esift2    | 5,814,714  | 4,834,598  | 4,834,598  | 4,835,486  | **4,835,486**  | **1.20×** |
+| coin      | 34,162,087 | 28,492,663 | 27,294,122 | 26,211,879 | **26,212,489** | **1.30×** |
 
-The three changes are almost disjoint in what they fix, which is why all three were worth doing.
-esift2's entire gain is the BTB, quickSort's is mostly the miss-status registers, and coin's is
-mostly the BTB with a useful tail from the memory port becoming free to issue into.
+The changes are almost disjoint in what they fix, which is why each was worth doing separately.
+esift2's entire gain is the BTB. coin's is mostly the BTB with a tail from the memory port becoming
+free to issue into. quickSort gains from none of the front-end work and from both memory changes,
+and it is the only benchmark that gains from the last column at all — which is exactly what the
+idle-cycle measurement predicted before any of it was built.
 
 ### Where the time goes
 
@@ -506,7 +602,7 @@ it, but still the window in which memory is the thing being waited on:
 | esift2    | 1.62 | 783    | 1.7%      | 0.05%  | the core |
 | coin      | 1.36 | 29     | 0.012%    | 0.011% | the core |
 | nqueens   | 1.33 | 96     | 1.4%      | 2.2%   | branch accuracy |
-| quickSort | 0.91 | 22,179 | **41.6%** | 0.11%  | memory |
+| quickSort | 0.97 | 22,182 | **38.9%** | 0.11%  | memory |
 
 #### How the front-end problem was found, and what fixing it did
 
@@ -543,30 +639,19 @@ is exactly what the pipelined D-cache port then relieved.
 
 #### What is left
 
-- **quickSort spends 18.9% of its cycles completely idle with a load it is not allowed to run.**
-  This is now the largest single measured opportunity anywhere in the design, and it is not a cache
-  problem. A load may not issue until every older store has computed its address, which is what
-  makes disambiguation exact and replay unnecessary — and on quickSort that rule is expensive:
-
-  | benchmark | a load held by the rule | *and nothing else ready to issue* |
-  | --- | --- | --- |
-  | quickSort | 991,094 (21.9%) | **854,588 (18.9%)** |
-  | coin      | 1,576,494 (6.0%) | **0** |
-  | nqueens   | 43,334 (5.7%) | **0** |
-  | esift2    | 3,131 (0.1%) | 3 |
-
-  The second column is what matters, and it is the whole story: on coin and nqueens a held load
-  never costs a cycle, because something else is always ready to take the slot. On quickSort there
-  is nothing else. Speculating on memory dependences (a store-set predictor, with a memory-order
-  violation recovering through the existing squash path) is therefore a one-benchmark change —
-  but that one benchmark is the worst-performing of the four, at IPC 0.91. The replay machinery it
-  needs already exists: the load/store queue grew `waiting`/`replay` for the miss-status registers.
 - **The window-size result should be re-measured.** Widening the window was recorded as worth 1.02×,
   but that was taken with a *blocking* cache, where D-cache miss cycles came out identical to
   within one cycle whatever the window size — the cache serialised everything regardless. Now that
   misses overlap, the window is what determines how many independent misses can be found at once,
   and a 64-entry reorder buffer at IPC 1 covers about 64 cycles against a 112-cycle miss. That
-  ablation is no longer valid evidence.
+  ablation is no longer valid evidence, and it is the first thing to redo.
+- **quickSort is still the worst of the four**, at IPC 0.97 against esift2's 1.62. Its misses
+  overlap and its loads no longer wait on unresolved stores; what is left is 22,182 line fills
+  against a 100-cycle memory on a single cache port. 39% of its cycles have nothing ready at all,
+  and that number is now dependence chains and memory latency rather than any rule the machine is
+  enforcing on itself.
+- **Prediction, not structures, is where coin and esift2 are.** Both hold 68% and 71% of cycles with
+  two ready instructions and issue two; they are at the width they have.
 - **nqueens is limited by branch accuracy**, at 76.3%. It is the one benchmark where a stronger
   direction predictor (TAGE) would pay; on coin and esift2 the tournament predictor is already at
   98% and there is nothing to win.
@@ -578,18 +663,18 @@ benchmark this design served worst, at 1.05×; it is now 1.37×, and the gap tha
 entirely front end.
 
 Window occupancy was measured directly to answer whether a **wider machine** would help, by
-counting how many issue-queue entries are ready each cycle. All four columns are of the
-non-blocking design, and `fetch_starved` is included because widening fetch is the other obvious
-thing to reach for:
+counting how many issue-queue entries are ready each cycle. All of it is measured on the final
+design, and `fetch_starved` is included because widening fetch is the other obvious thing to reach
+for:
 
 | benchmark | ≥1 ready | ≥2 | ≥3 | ≥4 | ≥2 memory ops | fetch starved |
 | --- | --- | --- | --- | --- | --- | --- |
 | esift2    | 91.8% | 71.4% | 23.4% | ~0    | ~0    | 0.4% |
-| coin      | 78.6% | 68.0% | 8.8%  | 1.3%  | 7.5%  | 0.6% |
-| nqueens   | 85.4% | 63.9% | 41.9% | 16.4% | 17.9% | 7.7% |
-| quickSort | 60.6% | 43.8% | 21.4% | 3.2%  | 1.2%  | 3.0% |
+| coin      | 78.6% | 69.3% | 13.1% | 3.7%  | 12.0% | 0.6% |
+| nqueens   | 85.4% | 65.3% | 44.8% | 18.9% | 20.3% | 7.7% |
+| quickSort | 64.3% | 46.7% | 23.0% | 3.3%  | 1.2%  | 3.2% |
 
-Three or more instructions are ready on 8.8% of coin's cycles and 23.4% of esift2's, so **4-wide is
+Three or more instructions are ready on 13.1% of coin's cycles and 23.4% of esift2's, so **4-wide is
 not worth it** — the parallelism to feed it is not in the window. Nor is **wider fetch**: the front
 end is starved on 0.6% of coin's cycles and 0.4% of esift2's, and nqueens' 7.7% is misprediction
 refill rather than fetch bandwidth. The front end already delivers more than the back end drains.
@@ -628,6 +713,15 @@ docker run --rm -v "$PWD:/work" -w /work/mips_cpu <image> bash -lc \
 
 Useful flags: `-b <benchmark>`, `-d` (dump `simx.fst`), `-m` (memory model debug, repeat for more),
 `-s` (skip stream checks), `-p` (print events).
+
+Building with `-DMDP_STRESS` turns every store that resolves behind an issued load into a memory
+order violation, which is the only way to exercise the
+[recovery path](#testing-a-path-that-never-runs) — real code almost never aliases there. The traces
+still have to match; it is simply very slow.
+
+```
+verilator --cc --exe --build -DSIMULATION -DMDP_STRESS -Imips_core -f verilator_files   --top-module mips_core verilator_main.cpp memory.cpp memory_driver.cpp
+```
 
 # Synthesis
 

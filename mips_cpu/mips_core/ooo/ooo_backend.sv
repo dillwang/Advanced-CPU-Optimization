@@ -109,6 +109,7 @@ module ooo_backend (
 		.busy,
 		.wb_valid, .wb_rob_idx, .wb_pd, .wb_writes, .wb_result,
 		.wb_redirect, .wb_target, .wb_outcome, .wb_mem_addr, .wb_mem_data,
+		.mv_valid, .mv_rob_idx,
 		.squash, .squash_head, .squash_count,
 		.redirect_valid (ex_redirect_valid),
 		.redirect_pc    (ex_redirect_pc),
@@ -129,6 +130,8 @@ module ooo_backend (
 	uop_t issue_uop [ISSUE_WIDTH];
 
 	logic lsq_accept, lsq_load_free, lsq_has_unresolved;
+	logic mv_valid;
+	rob_idx_t mv_rob_idx;
 	rob_idx_t lsq_oldest_unresolved;
 
 	issue_queue ISSUE_QUEUE (
@@ -288,6 +291,8 @@ module ooo_backend (
 		.o_has_unresolved     (lsq_has_unresolved),
 		.o_oldest_unresolved  (lsq_oldest_unresolved),
 		.rob_head,
+		.o_mv_valid   (mv_valid),
+		.o_mv_rob_idx (mv_rob_idx),
 		.ld_wb_valid, .ld_wb_rob_idx, .ld_wb_pd, .ld_wb_writes,
 		.ld_wb_data, .ld_wb_addr,
 		.st_valid, .st_addr, .st_data, .st_done,

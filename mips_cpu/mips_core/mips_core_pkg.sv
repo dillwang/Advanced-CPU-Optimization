@@ -129,6 +129,22 @@ parameter int BTB_TAG_W    = 26 - BTB_IDX_W - 2;	// ADDR_WIDTH - index - 2
 parameter int NUM_MSHR   = 4;
 parameter int MSHR_IDX_W = 2;		// $clog2(NUM_MSHR)
 
+// Memory dependence prediction. A load is normally held until every older
+// store has computed its address, which makes disambiguation exact and replay
+// unnecessary -- but on a store-heavy program it is also most of the idle time.
+// Loads are therefore allowed past unresolved stores, and a store that turns
+// out to write a word a younger load already read squashes that load.
+//
+// This table is the brake. It is a bit per load pc: set when that load causes a
+// violation, and read at dispatch, and a load whose bit is set goes back to
+// waiting for every older store. Almost all violations come from a handful of
+// static loads, so one bit each is enough to stop them repeating.
+parameter int MDP_ENTRIES = 1024;
+parameter int MDP_IDX_W   = 10;		// $clog2(MDP_ENTRIES)
+// The table is cleared every 2**MDP_CLEAR_W cycles, so a bit set by an aliasing
+// pc or by a phase that has ended does not disable that load for the whole run.
+parameter int MDP_CLEAR_W = 16;
+
 typedef logic [PRF_IDX_W - 1 : 0] preg_t;
 typedef logic [ROB_IDX_W - 1 : 0] rob_idx_t;
 typedef logic [LSQ_IDX_W - 1 : 0] lsq_idx_t;
@@ -208,6 +224,9 @@ typedef struct packed {
 	// whose target is not known until the register is read.
 	logic is_branch;
 	logic is_jump_reg;
+	// Any control transfer, conditional or not. The instruction after one is
+	// its delay slot, and a delay slot can never be re-fetched on its own.
+	logic is_ctrl;
 	BranchOutcome prediction;
 	logic [25:0] recovery_target;	// where to go if the guess was wrong
 	logic [25:0] seq_target;		// pc + 8, the address after the delay slot
@@ -222,6 +241,9 @@ typedef struct packed {
 	logic is_mem;
 	MemAccessType mem_action;
 	lsq_idx_t lsq_idx;
+	// Set when the memory dependence predictor has seen this load violate. It
+	// then waits for every older store instead of speculating past them.
+	logic mem_wait;
 
 	logic is_done;					// MTC0_DONE, ends the simulation
 

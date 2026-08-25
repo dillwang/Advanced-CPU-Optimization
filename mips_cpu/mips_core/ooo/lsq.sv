@@ -9,10 +9,13 @@
  *     and data when it issues, sits in the queue, and is written to the cache
  *     only when the reorder buffer retires it. A squashed store therefore
  *     cannot have changed memory.
- *   - A load may issue ahead of older stores only once every older store has
- *     computed its address (the issue queue enforces this using
- *     o_oldest_unresolved). At that point the load can be disambiguated
- *     exactly, so no replay mechanism is needed.
+ *   - A load may issue ahead of an older store whose address is not known yet.
+ *     That is a guess, and this module is where it is checked: when the store
+ *     finally computes its address, any younger load that already read the same
+ *     word is a memory order violation, and o_mv_valid asks the reorder buffer
+ *     to squash it and everything after it. Loads the predictor has marked
+ *     (mem_wait) are held by the issue queue instead, using
+ *     o_oldest_unresolved, and cannot violate at all.
  *   - A load that matches an older store in the queue takes its value straight
  *     from the queue instead of the cache (store to load forwarding). The
  *     youngest matching older store wins.
@@ -64,6 +67,13 @@ module lsq (
 	output logic o_has_unresolved,
 	output rob_idx_t o_oldest_unresolved,
 	input  rob_idx_t rob_head,
+
+	// ---- memory order violation ----
+	// A store has just found that this load read the word it is about to
+	// write. Raised one cycle after the store computes its address, so that
+	// the squash it causes does not feed back into the issue it came from.
+	output logic o_mv_valid,
+	output rob_idx_t o_mv_rob_idx,
 
 	// ---- load writeback ----
 	output logic ld_wb_valid,
@@ -120,6 +130,11 @@ module lsq (
 		// then, so the queue has to carry the destination itself.
 		preg_t pd;
 		logic writes;
+		// For a load, the store it took its value from, if any. A store that
+		// resolves late is only a violation for loads that did not already
+		// forward from a store younger than it.
+		logic fwd_valid;
+		rob_idx_t fwd_src;
 	} lsq_entry_t;
 
 	lsq_entry_t e [LSQ_ENTRIES];
@@ -194,6 +209,7 @@ module lsq (
 	// issuing load and hits the same word supplies the data.
 	logic fwd_hit;
 	logic [`DATA_WIDTH - 1 : 0] fwd_data;
+	rob_idx_t fwd_src;
 	logic [ROB_IDX_W : 0] issue_age;
 
 	always_comb
@@ -203,6 +219,7 @@ module lsq (
 		issue_age = {1'b0, rob_idx_t'(mem_uop.rob_idx - rob_head)};
 		fwd_hit = 1'b0;
 		fwd_data = '0;
+		fwd_src = '0;
 
 		for (int i = 0; i < LSQ_ENTRIES; i++)
 		begin
@@ -217,11 +234,89 @@ module lsq (
 				begin
 					fwd_hit = 1'b1;
 					fwd_data = e[i].data;
+					fwd_src = e[i].rob_idx;
 					best_age = a;
 				end
 			end
 		end
 	end
+
+	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+	// |||| Memory order violation
+	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+	// A store computing its address late can find that a younger load has
+	// already run and read the word it is about to write. That load took its
+	// value from the cache, or forwarded from a store older than this one, and
+	// is wrong -- as is everything that used it.
+	//
+	// This is the only cycle it can be discovered in. A load that has already
+	// issued has already chosen where its data comes from, at issue, so the
+	// check has to happen against every younger load that has an address.
+	//
+	// The oldest offender wins: squashing it takes the younger ones with it.
+	logic mv_hit;
+	rob_idx_t mv_rob;
+
+	always_comb
+	begin
+		automatic logic [ROB_IDX_W : 0] best = '0;
+		automatic logic [ROB_IDX_W : 0] s_age =
+			{1'b0, rob_idx_t'(mem_uop.rob_idx - rob_head)};
+		automatic logic st_issue = mem_issue && (mem_uop.mem_action == WRITE);
+
+		mv_hit = 1'b0;
+		mv_rob = '0;
+
+		for (int i = 0; i < LSQ_ENTRIES; i++)
+		begin
+			automatic logic [ROB_IDX_W : 0] a =
+				{1'b0, rob_idx_t'(e[i].rob_idx - rob_head)};
+			// A load that forwarded from a store younger than this one already
+			// holds the right value: this store is not the last write to that
+			// word before it.
+			automatic logic covered = e[i].fwd_valid
+				&& ({1'b0, rob_idx_t'(e[i].fwd_src - rob_head)} > s_age);
+
+			// MDP_STRESS drops the address test, so every store that resolves
+			// behind an issued load reports a violation. Real programs almost
+			// never alias here, which would leave the recovery path untested;
+			// under stress it fires constantly and the golden traces still have
+			// to match. Correctness only -- it is ruinously slow.
+`ifdef MDP_STRESS
+			if (st_issue && e[i].valid && !e[i].is_store && e[i].addr_valid
+				&& (a > s_age))
+`else
+			if (st_issue && e[i].valid && !e[i].is_store && e[i].addr_valid
+				&& (a > s_age) && (e[i].addr == mem_addr) && !covered)
+`endif
+			begin
+				if (!mv_hit || (a < best))
+				begin
+					mv_hit = 1'b1;
+					mv_rob = e[i].rob_idx;
+					best = a;
+				end
+			end
+		end
+	end
+
+	// Registered, and this is not optional: the squash it raises reaches the
+	// issue queue, which is what produced the store issue that detected it.
+	// Passing it out combinationally would close that loop. One cycle later
+	// nothing has changed that matters -- the load cannot commit, because the
+	// store that caught it is older and has not committed either.
+	logic mv_pend_valid;
+	rob_idx_t mv_pend_rob;
+	logic mv_keep_pending;
+
+	// If a second violation is found while one is still pending, the older of
+	// the two is kept, because its squash covers the younger one anyway.
+	assign mv_keep_pending = mv_pend_valid
+		&& ({1'b0, rob_idx_t'(mv_rob - rob_head)}
+			>= {1'b0, rob_idx_t'(mv_pend_rob - rob_head)});
+
+	assign o_mv_valid = mv_pend_valid;
+	assign o_mv_rob_idx = mv_pend_rob;
 
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 	// |||| D cache port
@@ -474,6 +569,7 @@ module lsq (
 			acc_hold <= 1'b0;
 			st_wait_valid <= 1'b0;
 			fwd_pending <= 1'b0;
+			mv_pend_valid <= 1'b0;
 		end
 		else
 		begin
@@ -505,6 +601,16 @@ module lsq (
 					// uop, which is retired from the issue queue by then.
 					e[mem_uop.lsq_idx].pd <= mem_uop.pd;
 					e[mem_uop.lsq_idx].writes <= mem_uop.uses_rw;
+					// And which store it took its value from, so a store that
+					// resolves later can tell whether it was overtaken.
+					e[mem_uop.lsq_idx].fwd_valid <= fwd_hit;
+					e[mem_uop.lsq_idx].fwd_src <= fwd_src;
+				`ifdef SIMULATION
+					if (o_has_unresolved
+						&& (issue_age > {1'b0,
+							rob_idx_t'(o_oldest_unresolved - rob_head)}))
+						stats_event("memdep_speculated");
+				`endif
 				end
 
 				// A load that misses the forwarding path is picked up by the
@@ -522,6 +628,15 @@ module lsq (
 				`endif
 				end
 			end
+
+			// ---- memory order violation, held for one cycle ----
+			if (mv_hit && !mv_keep_pending)
+			begin
+				mv_pend_valid <= 1'b1;
+				mv_pend_rob <= mv_rob;
+			end
+			else
+				mv_pend_valid <= 1'b0;
 
 			// ---- a fill lands: everything behind it may be replayed ----
 			if (dc_fill_valid)

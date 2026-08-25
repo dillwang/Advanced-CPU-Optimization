@@ -63,6 +63,9 @@ module issue_queue (
 	// older store has not computed its address yet. This is what a memory
 	// dependence predictor would let issue.
 	logic mem_dep_held [IQ_ENTRIES];
+	// ...and the subset the predictor actually stops. mem_dep_held is the
+	// opportunity, mem_dep_blocked is what is left of it.
+	logic mem_dep_blocked [IQ_ENTRIES];
 
 	always_comb
 	begin
@@ -81,14 +84,17 @@ module issue_queue (
 			if ((q[i].is_branch || q[i].is_jump_reg) && (age[i] + 1 >= rob_count))
 				ready[i] = 1'b0;
 
-			// A load may not pass a store whose address is still unknown.
-			// Older stores have all computed their addresses once no
-			// unresolved store is older than this load.
+			// A load may pass a store whose address is still unknown -- that is
+			// a guess, and the load/store queue checks it when the store
+			// resolves. A load the memory dependence predictor has already
+			// caught violating does not get to guess again, and waits until no
+			// unresolved store is older than it.
 			mem_dep_held[i] = q[i].is_mem && (q[i].mem_action == READ)
 				&& ready[i]
 				&& lsq_has_unresolved_store
 				&& (age[i] > {1'b0, rob_idx_t'(lsq_oldest_unresolved - rob_head)});
-			if (mem_dep_held[i])
+			mem_dep_blocked[i] = mem_dep_held[i] && q[i].mem_wait;
+			if (mem_dep_blocked[i])
 				ready[i] = 1'b0;
 
 			// An entry this cycle's squash is about to kill must not start.
@@ -273,11 +279,14 @@ module issue_queue (
 			automatic int n_ready = 0;
 			automatic int n_ready_mem = 0;
 			automatic int n_dep_held = 0;
+			automatic int n_dep_blocked = 0;
 
 			for (int i = 0; i < IQ_ENTRIES; i++)
 			begin
 				if (mem_dep_held[i])
 					n_dep_held = n_dep_held + 1;
+				if (mem_dep_blocked[i])
+					n_dep_blocked = n_dep_blocked + 1;
 				if (ready[i])
 				begin
 					n_ready = n_ready + 1;
@@ -296,6 +305,9 @@ module issue_queue (
 			// memory dependences instead of waiting for every older store.
 			if (n_dep_held >= 1) stats_event("memdep_held");
 			if ((n_dep_held >= 1) && (n_ready == 0)) stats_event("memdep_held_idle");
+			// What the predictor is still refusing to speculate.
+			if (n_dep_blocked >= 1) stats_event("memdep_blocked");
+			if ((n_dep_blocked >= 1) && (n_ready == 0)) stats_event("memdep_blocked_idle");
 		end
 	end
 `endif
