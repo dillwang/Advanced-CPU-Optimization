@@ -99,8 +99,8 @@ endinterface
 // inside that line, so a fetch near the end of a line simply delivers fewer.
 interface fetch_output_ifc ();
 	logic valid;
-	logic [FE_WIDTH - 1 : 0] word_valid;
-	logic [`DATA_WIDTH - 1 : 0] data [FE_WIDTH];
+	logic [FETCH_WIDTH - 1 : 0] word_valid;
+	logic [`DATA_WIDTH - 1 : 0] data [FETCH_WIDTH];
 
 	modport in  (input valid, word_valid, data);
 	modport out (output valid, word_valid, data);

@@ -10,6 +10,24 @@
  * from the other end, so the two do not have to agree on a count in the same
  * cycle and a cache miss does not immediately starve rename.
  *
+ * Fetch is deliberately wider than decode: FETCH_WIDTH words in, FE_WIDTH out.
+ * At equal widths the front end delivered a single instruction on half of
+ * coin's cycles without ever looking starved, because two things each cost a
+ * half-width cycle and neither empties the buffer:
+ *
+ *   - a fetch pair straddling the end of a cache line. The second word belongs
+ *     to a different line and would need a second lookup, so it is simply not
+ *     offered. 5.86 M cycles on coin.
+ *   - the cycle after a taken branch whose delay slot fell outside the pair.
+ *     MIPS has to run that instruction, so fetch spends a cycle collecting it
+ *     alone before going to the target. 7.01 M cycles on coin -- almost exactly
+ *     one per conditional branch, of which coin has one every five
+ *     instructions.
+ *
+ * Reading a whole line at a time removes the first outright and confines the
+ * second to a branch in the last word of the group. Decode still takes two per
+ * cycle off the other end; the buffer absorbs the difference.
+ *
  * Prediction happens in fetch, not decode. A branch target buffer is probed
  * with the pc being fetched, in parallel with the instruction cache access for
  * that same pc, and answers whether the instruction there is a control
@@ -51,8 +69,8 @@ module frontend (
 	output logic [`ADDR_WIDTH - 1 : 0] o_pc_current,
 	output logic [`ADDR_WIDTH - 1 : 0] o_pc_next,
 	input  logic i_inst_valid,
-	input  logic [FE_WIDTH - 1 : 0] i_word_valid,
-	input  logic [`DATA_WIDTH - 1 : 0] i_inst_data [FE_WIDTH],
+	input  logic [FETCH_WIDTH - 1 : 0] i_word_valid,
+	input  logic [`DATA_WIDTH - 1 : 0] i_inst_data [FETCH_WIDTH],
 
 	// ---- to rename ----
 	output dec_uop_t fe_uop [FE_WIDTH],
@@ -77,8 +95,8 @@ module frontend (
 	import "DPI-C" function void stats_event (input string e);
 `endif
 
-	localparam int FB_DEPTH = 8;
-	localparam int FB_IDX_W = 3;
+	localparam int FB_DEPTH = 16;
+	localparam int FB_IDX_W = 4;
 
 	// What fetch decided about one instruction, carried alongside it through
 	// the fetch buffer so that decode can check the decision and commit can
@@ -115,10 +133,10 @@ module frontend (
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 	// |||| Branch target buffer lookup
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
-	logic [`ADDR_WIDTH - 1 : 0] fetch_pc [FE_WIDTH];
-	logic btb_hit [FE_WIDTH];
-	logic btb_uncond [FE_WIDTH];
-	logic [`ADDR_WIDTH - 1 : 0] btb_target [FE_WIDTH];
+	logic [`ADDR_WIDTH - 1 : 0] fetch_pc [FETCH_WIDTH];
+	logic btb_hit [FETCH_WIDTH];
+	logic btb_uncond [FETCH_WIDTH];
+	logic [`ADDR_WIDTH - 1 : 0] btb_target [FETCH_WIDTH];
 
 	logic btb_wr_valid;
 	logic [`ADDR_WIDTH - 1 : 0] btb_wr_pc;
@@ -127,7 +145,7 @@ module frontend (
 
 	genvar gf;
 	generate
-		for (gf = 0; gf < FE_WIDTH; gf++)
+		for (gf = 0; gf < FETCH_WIDTH; gf++)
 		begin : fetch_addr
 			assign fetch_pc[gf] = pc_reg + `ADDR_WIDTH'(gf << 2);
 		end
@@ -163,7 +181,7 @@ module frontend (
 		hit_slot = '0;
 		if (!pend_fe_valid)
 		begin
-			for (int j = FE_WIDTH - 1; j >= 0; j--)
+			for (int j = FETCH_WIDTH - 1; j >= 0; j--)
 			begin
 				if (btb_hit[j])
 				begin
@@ -175,9 +193,12 @@ module frontend (
 	end
 
 	// Fetch never runs past the delay slot of a recognised branch, so an
-	// unpredicted branch can never slip into the buffer behind a predicted one.
-	// At FE_WIDTH = 2 the limit is never actually binding, but it is what makes
-	// the one-prediction-per-cycle rule safe at any width.
+	// unpredicted branch can never slip into the buffer behind a predicted one
+	// and only one prediction is ever in flight per cycle. At FETCH_WIDTH = 4
+	// this does bind: a branch recognised in the first word stops the push at
+	// two. That is still a full decode group, which is the point of fetching
+	// wider than decode -- the cost lands on fetch, where there is slack, and
+	// not on the buffer, which keeps handing decode two per cycle.
 	logic [2:0] push_limit;
 	always_comb
 	begin
@@ -186,7 +207,7 @@ module frontend (
 		else if (hit_found)
 			push_limit = hit_slot + 3'd2;
 		else
-			push_limit = 3'(FE_WIDTH);
+			push_limit = 3'(FETCH_WIDTH);
 	end
 
 	// How many words the cache can give us for this line, limited by room in
@@ -196,7 +217,7 @@ module frontend (
 		push_n = '0;
 		if (i_inst_valid && !fb_flush)
 		begin
-			for (int j = 0; j < FE_WIDTH; j++)
+			for (int j = 0; j < FETCH_WIDTH; j++)
 			begin
 				// Words must be contiguous: stop at the first one that falls
 				// outside the cache line.
@@ -223,7 +244,7 @@ module frontend (
 		hit_uncond = 1'b0;
 		hit_target = '0;
 		hit_pc = fetch_pc[0];
-		for (int j = 0; j < FE_WIDTH; j++)
+		for (int j = 0; j < FETCH_WIDTH; j++)
 		begin
 			if (3'(j) == hit_slot)
 			begin
@@ -275,10 +296,10 @@ module frontend (
 	// What gets written into each buffer slot filled this cycle. Only the
 	// recognised branch carries a prediction; every entry records the live
 	// history, so that a jr redirect can restore it too and not only a branch.
-	fe_pred_t push_pred [FE_WIDTH];
+	fe_pred_t push_pred [FETCH_WIDTH];
 	always_comb
 	begin
-		for (int j = 0; j < FE_WIDTH; j++)
+		for (int j = 0; j < FETCH_WIDTH; j++)
 		begin
 			push_pred[j] = '0;
 			push_pred[j].bp_perc = NOT_TAKEN;
@@ -526,6 +547,46 @@ module frontend (
 		end
 	end
 
+`ifdef SIMULATION
+	// Why the front end offered rename fewer than FE_WIDTH instructions. The
+	// three fetch-side reasons are exclusive and are counted only on cycles the
+	// cache actually answered, so they attribute a short push rather than a
+	// missing one.
+	always_ff @(posedge clk)
+	begin
+		if (rst_n)
+		begin
+			if (i_inst_valid && !fb_flush)
+			begin
+				// The cache could not offer two words: the pair straddles the
+				// end of a line, which needs a second lookup.
+				if (!i_word_valid[FETCH_WIDTH - 1]) stats_event("fe_line_edge");
+				if (push_n == 0) stats_event("fe_push_0");
+				if (push_n == 1) stats_event("fe_push_1");
+				if (push_n == 2) stats_event("fe_push_2");
+				if (push_n == 3) stats_event("fe_push_3");
+				if (push_n == 4) stats_event("fe_push_4");
+				// ...and of the short pushes, which constraint bound.
+				if ((push_n < 3'(FETCH_WIDTH)) && !i_word_valid[FETCH_WIDTH - 1])
+					stats_event("fe_push1_line");
+				else if ((push_n == 1) && pend_fe_valid)
+					stats_event("fe_push1_pend");
+				else if ((push_n == 1) && (push_n == push_limit))
+					stats_event("fe_push1_btb");
+				else if (push_n == 1)
+					stats_event("fe_push1_room");
+			end
+			// What decode found waiting for it.
+			if (!slot_present[0]) stats_event("fb_none");
+			else if (!slot_present[FE_WIDTH - 1]) stats_event("fb_only1");
+			else stats_event("fb_full");
+			// And what it handed on.
+			if (accept_n == 1) stats_event("fe_accept_1");
+			if (accept_n == 2) stats_event("fe_accept_2");
+		end
+	end
+`endif
+
 	assign pop_n = fe_stall ? 3'd0 : accept_n;
 	assign fb_flush = ex_redirect_valid || dec_redirect_go;
 
@@ -547,7 +608,7 @@ module frontend (
 		begin
 			pc_reg <= o_pc_next;
 
-			for (int j = 0; j < FE_WIDTH; j++)
+			for (int j = 0; j < FETCH_WIDTH; j++)
 			begin
 				if ({1'b0, 3'(j)} < {1'b0, push_n})
 				begin
@@ -567,8 +628,8 @@ module frontend (
 			end
 			else
 			begin
-				fb_head <= FB_IDX_W'(fb_head + pop_n[FB_IDX_W - 1 : 0]);
-				fb_tail <= FB_IDX_W'(fb_tail + push_n[FB_IDX_W - 1 : 0]);
+				fb_head <= FB_IDX_W'(fb_head + FB_IDX_W'(pop_n));
+				fb_tail <= FB_IDX_W'(fb_tail + FB_IDX_W'(push_n));
 				fb_count <= fb_count - {1'b0, pop_n} + {1'b0, push_n};
 			end
 

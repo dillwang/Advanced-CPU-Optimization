@@ -234,7 +234,7 @@ module i_cache #(
     always_comb
     begin
         out.valid = hit;
-        for (int j = 0; j < FE_WIDTH; j++)
+        for (int j = 0; j < FETCH_WIDTH; j++)
         begin
             automatic int off = int'(i_block_offset) + j;
             // Words past the end of the line belong to a different line and

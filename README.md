@@ -443,28 +443,30 @@ run to completion with all three streams matching.**
 Cycle counts, lower is better. Instruction counts match the baseline exactly on every benchmark,
 so cycles and CPI carry all the information.
 
-| benchmark | baseline (in-order) | out-of-order core | + caches | + front end | + non-blocking | + memory speculation | **+ window sizing** | speedup | IPC |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| nqueens   | 1,722,402  | 1,609,896  | 890,370    | 807,339    | 764,041    | 763,961    | **763,332**    | **2.26×** | 1.33 |
-| quickSort | 9,572,553  | 7,740,489  | 5,492,808  | 5,240,726  | 4,528,689  | 4,235,844  | **3,495,796**  | **2.74×** | 1.17 |
-| esift2    | 21,375,975 | 17,254,324 | 5,814,714  | 4,834,600  | 4,835,486  | 4,835,486  | **4,835,133**  | **4.42×** | 1.62 |
-| coin      | 35,944,392 | —          | 34,162,087 | 27,294,090 | 26,211,879 | 26,212,489 | **25,207,827** | **1.43×** | 1.42 |
+| benchmark | baseline (in-order) | out-of-order core | + caches | + front end | + non-blocking | + memory spec. | + window sizing | **+ wide fetch** | speedup | IPC |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| nqueens   | 1,722,402  | 1,609,896  | 890,370    | 807,339    | 764,041    | 763,961    | 763,332    | **757,970**    | **2.27×** | 1.34 |
+| quickSort | 9,572,553  | 7,740,489  | 5,492,808  | 5,240,726  | 4,528,689  | 4,235,844  | 3,495,796  | **3,400,154**  | **2.82×** | 1.21 |
+| esift2    | 21,375,975 | 17,254,324 | 5,814,714  | 4,834,600  | 4,835,486  | 4,835,486  | 4,835,133  | **4,557,362**  | **4.69×** | 1.72 |
+| coin      | 35,944,392 | —          | 34,162,087 | 27,294,090 | 26,211,879 | 26,212,489 | 25,207,827 | **21,405,644** | **1.68×** | 1.67 |
 
-Geometric mean **2.50×**. The columns are cumulative: the out-of-order core at the original 2 KB
+Geometric mean **2.66×**. The columns are cumulative: the out-of-order core at the original 2 KB
 caches, then 8 KB instruction cache and 4-way 16 KB data cache, then prediction moved into fetch
 with a branch target buffer and the D-cache port pipelined, then the data cache made non-blocking,
-then loads allowed to speculate past unresolved stores, and finally the window sized against
+then loads allowed to speculate past unresolved stores, then the window sized against
 [measured stall attribution](#what-actually-bounds-the-window) rather than guesswork —
-`PHYS_REGS` and `ROB_ENTRIES` to 128, `LSQ_ENTRIES` to 32.
+`PHYS_REGS` and `ROB_ENTRIES` to 128, `LSQ_ENTRIES` to 32 — and finally
+[fetch made wider than decode](#fetching-wider-than-decode), which was the largest single step of
+the four and the one that had been argued against on the strength of the wrong counter.
 
 The last four columns are worth isolating, since they are where the recent work went:
 
-| benchmark | before front end work | + BTB in fetch | + pipelined D-cache port | + non-blocking D-cache | + memory speculation | + window sizing | total |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| nqueens   | 890,370    | 860,124    | 807,349    | 764,041    | 763,961    | **763,332**    | **1.17×** |
-| quickSort | 5,492,808  | 5,273,026  | 5,239,953  | 4,528,689  | 4,235,844  | **3,495,796**  | **1.57×** |
-| esift2    | 5,814,714  | 4,834,598  | 4,834,598  | 4,835,486  | 4,835,486  | **4,835,133**  | **1.20×** |
-| coin      | 34,162,087 | 28,492,663 | 27,294,122 | 26,211,879 | 26,212,489 | **25,207,827** | **1.36×** |
+| benchmark | before front end work | + BTB in fetch | + pipelined D-cache port | + non-blocking D-cache | + memory spec. | + window sizing | + wide fetch | total |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| nqueens   | 890,370    | 860,124    | 807,349    | 764,041    | 763,961    | 763,332    | **757,970**    | **1.17×** |
+| quickSort | 5,492,808  | 5,273,026  | 5,239,953  | 4,528,689  | 4,235,844  | 3,495,796  | **3,400,154**  | **1.62×** |
+| esift2    | 5,814,714  | 4,834,598  | 4,834,598  | 4,835,486  | 4,835,486  | 4,835,133  | **4,557,362**  | **1.28×** |
+| coin      | 34,162,087 | 28,492,663 | 27,294,122 | 26,211,879 | 26,212,489 | 25,207,827 | **21,405,644** | **1.60×** |
 
 The changes are almost disjoint in what they fix, which is why each was worth doing separately.
 esift2's entire gain is the BTB. coin's is mostly the BTB with a tail from the memory port becoming
@@ -611,13 +613,63 @@ retiring 1.42. It is not short of parallelism; it is short of instructions. The 
 ready" is a consequence — at 1.42 arrivals per cycle against two issue slots the window can never
 accumulate, which is exactly why its occupancy never reaches 16.
 
-The mechanism is in `ooo/frontend.sv`: a fetch group is **cut after any control instruction and its
-delay slot**, so that only one prediction is in flight per cycle. coin is 20.1% conditional
-branches — one every five instructions — so the group is cut almost continuously.
+The obvious suspect was the rule that cuts a fetch group after a control instruction and its delay
+slot, so that only one prediction is in flight per cycle. That was wrong: at `FE_WIDTH = 2` a branch
+in the first word still takes its delay slot with it, and the rule never costs a slot. Counting the
+short fetches directly gives two causes instead, of near-equal size:
 
-This is what `fetch_starved` could not see, and it is a good argument for measuring the thing you
-care about rather than a proxy for it. A completely empty fetch buffer is rare; a half-empty one is
-the common case and costs just as much.
+| why fetch pushed one word | coin | share |
+| --- | --- | --- |
+| the pair straddles the end of a 4-word cache line | 5,859,615 | 45.0% |
+| the delay slot of a taken branch fell outside the pair | 7,008,269 | 53.8% |
+| no room in the fetch buffer | 149,545 | 1.1% |
+
+The second number is worth reading twice: **7,008,269 short fetches against 7,181,543 conditional
+branches, 0.98 per branch.** Essentially every taken branch cost a half-width fetch cycle, because
+MIPS has to run the delay slot and it was not in the pair.
+
+Neither cause empties the buffer, which is exactly why `fetch_starved` never saw them -- and that is
+the real lesson. A completely empty fetch buffer is rare. A half-empty one was the common case, cost
+just as much, and the counter being used to rule out wider fetch could not tell them apart.
+
+### Fetching wider than decode
+
+Both causes disappear if fetch reads a whole line, so fetch width is now decoupled from decode
+width: **`FETCH_WIDTH` 4 words in, `FE_WIDTH` 2 instructions out**, with the fetch buffer absorbing
+the difference. The instruction cache already read a full line into its banks; it was refusing to
+offer words past the end of a line, and being asked for only two in any case.
+
+- A line-aligned fetch never crosses the end of a line, so the straddle case is gone outright.
+- The delay-slot case narrows to a branch in the **last** word of the group. `push_limit` is
+  `hit_slot + 2`, so a branch recognised in word 0, 1 or 2 brings its delay slot with it.
+- The fetch buffer went from 8 entries to 16, to absorb four in against two out.
+
+Nothing in decode, rename or the back end changed.
+
+| benchmark | before | after | gain | IPC |
+| --- | --- | --- | --- | --- |
+| **coin**  | 25,207,827 | **21,405,644** | **1.178x** | 1.419 -> **1.671** |
+| esift2    | 4,835,133  | **4,557,362**  | 1.061x | 1.625 -> **1.724** |
+| quickSort | 3,495,796  | **3,400,154**  | 1.028x | 1.174 -> 1.207 |
+| nqueens   | 763,332    | **757,970**    | 1.007x | 1.330 -> 1.339 |
+
+esift2 reaches **86% of the theoretical maximum** for a two-wide machine, and coin -- the benchmark
+this design served worst of all, at 1.05x when the out-of-order core was first built -- reaches
+1.68x.
+
+The confirmation that the diagnosis was right is what happened to the back end without a single
+execution resource being touched:
+
+| coin | before | after |
+| --- | --- | --- |
+| front end offers two instructions | 49.8% | **98.1%** |
+| cycles issuing nothing | 22.9% | **6.6%** |
+| window holds work but nothing is ready | 5,191,260 | **1,571** |
+
+That last row is the whole argument. The 20.6% of cycles with "nothing ready" reads like dependence
+chains, and would ordinarily be answered with a deeper window or a wider issue stage. It was
+**entirely** an artefact of a window that could not accumulate at 1.42 arrivals per cycle, and
+feeding the same back end properly made it vanish.
 
 ### What actually bounds the window
 
@@ -739,10 +791,10 @@ it, but still the window in which memory is the thing being waited on:
 
 | benchmark | IPC (ceiling 2.0) | D-cache misses | fill outstanding | I-cache stall | limited by |
 | --- | --- | --- | --- | --- | --- |
-| esift2    | 1.62 | 783    | 1.7%      | 0.05%  | the core |
-| coin      | 1.42 | 29     | 0.012%    | 0.012% | the core, then the load/store queue |
-| nqueens   | 1.33 | 96     | 1.4%      | 2.2%   | branch accuracy |
-| quickSort | 1.17 | 22,188 | **31.2%** | 0.14%  | the miss-status registers |
+| esift2    | **1.72** | 783    | 1.9%      | 0.05%  | issue width, 86% of ceiling |
+| coin      | **1.67** | 29     | 0.015%    | 0.014% | issue width, 84% of ceiling |
+| nqueens   | 1.34 | 96     | 1.4%      | 2.2%   | branch accuracy |
+| quickSort | 1.21 | 22,188 | ~32%      | 0.14%  | the miss-status registers |
 
 #### How the front-end problem was found, and what fixing it did
 
@@ -784,16 +836,22 @@ is exactly what the pipelined D-cache port then relieved.
   8,112 misses are refused outright. `NUM_MSHR` cannot simply be raised: the memory model accepts
   four outstanding reads **per AXI id** and the D-cache uses one, so going further means giving it a
   second master id. That is the clearest remaining ceiling on the one memory-bound benchmark.
-- **coin is capped by front-end delivery**, not by anything in the back end: it is offered a single
-  instruction on 49.0% of cycles and retires 1.42 per cycle against a delivery rate of 1.49. See
-  [what the front end really delivers](#what-the-front-end-really-delivers). Letting a fetch group
-  continue past a predicted-taken branch is the only change that addresses it, and coin is 25.2 M
-  of the suite's 34.3 M cycles.
-- **`LSQ_ENTRIES` 64 was measured and rejected.** It is worth 1.025× on coin (whose load/store
-  queue stalls go to zero) and *nothing* on the other three — quickSort is identical to the cycle.
-  That is +0.6% geometric mean for doubling a structure every entry of which sits in the
-  store-to-load forwarding CAM, the disambiguation scan and the violation scan. It buys cycles at
-  the direct expense of clock frequency, which the cycle counts here cannot see.
+- **The two large benchmarks are close to the two-wide ceiling.** esift2 is at IPC 1.72 and coin at
+  1.67 against a maximum of 2.0 — 86% and 84%. Both now have a front end that delivers two
+  instructions on 98% of cycles, so what is left there is genuinely issue width and dependence
+  chains rather than any structure that can be resized.
+- **`LSQ_ENTRIES` 64 was measured and rejected twice.** Against the narrow front end it was worth
+  1.025× on coin and nothing on the other three. It was re-measured afterwards, because coin's
+  dispatch stalls had risen to 2,837,999 and all of them were the load/store queue — and on the
+  wide-fetch design it is worth **nothing at all**: coin 21,405,644 → 21,405,568, quickSort
+  identical to the cycle. What it does is move coin's stall from the load/store queue to the
+  reorder buffer, 2,838,567 → 3,095,390, for **76 cycles**.
+
+  That is the most useful negative result in this file, because it shows a dispatch stall is not
+  automatically a cost. When the machine is limited by something else, whichever queue happens to
+  fill first is what the counter reports, and relieving it just moves the backlog one structure
+  along. `stall_preg` and `stall_rob` were causal — fixing them was worth 1.089× and 1.099×.
+  coin's `stall_lsq` never was. The counter tells you where the queue ends, not always why.
 - **quickSort's remaining stalls have no single owner**: reorder buffer 166,542, issue queue
   120,351, free list 32,218. The issue queue binding at all is new. There is no next parameter.
 - **nqueens is limited by branch accuracy** and nothing structural: 8,548 dispatch stalls in its
@@ -801,12 +859,13 @@ is exactly what the pipelined D-cache port then relieved.
 - **nqueens is limited by branch accuracy**, at 76.3%. It is the one benchmark where a stronger
   direction predictor (TAGE) would pay; on coin and esift2 the tournament predictor is already at
   98% and there is nothing to win.
-- **esift2 and coin are core limited** at IPC 1.62 and 1.42 against a ceiling of 2.0. What is left
-  there is issue width and dependence chains, not any single structure.
+- **esift2 and coin are core limited** at IPC 1.72 and 1.67 against a ceiling of 2.0 — 86% and 84%
+  of it. What is left there is issue width and dependence chains, not any single structure.
 
 For reference, the in-order baseline runs coin at IPC 0.995 — 99.5% of *its* ceiling. coin was the
-benchmark this design served worst, at 1.05×; it is now 1.43×. Most of that gap was the front end,
-and the last 1.04× of it was a load/store queue that had been half the size it needed to be.
+benchmark this design served worst, at 1.05×; it is now **1.68×** at IPC 1.67. Essentially all of
+that gap was the front end — first predicting in fetch with a target buffer, then fetching wider
+than decode — and almost none of it was the out-of-order machinery it was originally blamed on.
 
 Window occupancy was measured directly to answer whether a **wider machine** would help, by
 counting how many issue-queue entries are ready each cycle. All of it is measured on the final

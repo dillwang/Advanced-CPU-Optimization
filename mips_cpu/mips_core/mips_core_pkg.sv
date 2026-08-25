@@ -112,7 +112,17 @@ parameter int IQ_ENTRIES   = 32;
 // 64 reorder buffer entries, doubling this measured zero to the cycle.
 parameter int LSQ_ENTRIES  = 32;
 parameter int LSQ_IDX_W    = 5;		// $clog2(LSQ_ENTRIES)
-parameter int FE_WIDTH     = 2;		// fetch / rename / dispatch / commit width
+parameter int FE_WIDTH     = 2;		// decode / rename / dispatch / commit width
+// How many words fetch pulls out of the instruction cache per cycle. This is
+// deliberately wider than FE_WIDTH and is the whole point of the fetch buffer:
+// at two words a fetch pair straddling the end of a cache line delivers one
+// instruction, and so does the cycle after a taken branch whose delay slot fell
+// outside the pair. Measured on coin, those two cost 5.86 M and 7.01 M cycles
+// of half-width fetch respectively -- together more than half the run, against
+// an instruction cache miss rate of 0.01%. Reading a whole line instead removes
+// both, and decode still takes FE_WIDTH per cycle off the other end.
+// Must not exceed the instruction cache's LINE_SIZE.
+parameter int FETCH_WIDTH  = 4;
 parameter int ISSUE_WIDTH  = 2;		// instructions started per cycle
 // One writeback port per issue port for the ALUs, plus one for load data
 // returning from the load/store queue an arbitrary number of cycles later.
@@ -166,7 +176,7 @@ typedef logic [MSHR_IDX_W - 1 : 0] mshr_id_t;
 // hard zero. The decoder already clears uses_r* for architectural register
 // zero, so every unused operand renames to this tag and needs no special case
 // anywhere else in the back end.
-parameter preg_t PREG_ZERO = 6'd0;
+parameter preg_t PREG_ZERO = PRF_IDX_W'(0);
 
 // A decoded instruction on its way into rename. This is just the fields of
 // decoder_output_ifc flattened into a packed struct so that the front end can

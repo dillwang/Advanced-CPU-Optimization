@@ -22,7 +22,7 @@
  * this design has no way to check in fetch; they keep taking the redirect from
  * execute exactly as before.
  *
- * FE_WIDTH read ports, because fetch probes every instruction in the line it is
+ * FETCH_WIDTH read ports, because fetch probes every instruction in the line it is
  * fetching, and one write port.
  */
 `include "mips_core.svh"
@@ -32,10 +32,10 @@ module btb (
 	input rst_n,  // Synchronous reset active low
 
 	// ---- lookup, in fetch ----
-	input  logic [`ADDR_WIDTH - 1 : 0] i_rd_pc [FE_WIDTH],
-	output logic o_hit [FE_WIDTH],
-	output logic o_uncond [FE_WIDTH],
-	output logic [`ADDR_WIDTH - 1 : 0] o_target [FE_WIDTH],
+	input  logic [`ADDR_WIDTH - 1 : 0] i_rd_pc [FETCH_WIDTH],
+	output logic o_hit [FETCH_WIDTH],
+	output logic o_uncond [FETCH_WIDTH],
+	output logic [`ADDR_WIDTH - 1 : 0] o_target [FETCH_WIDTH],
 
 	// ---- fill, from decode ----
 	input  logic i_wr_valid,
@@ -65,7 +65,7 @@ module btb (
 
 	genvar g;
 	generate
-		for (g = 0; g < FE_WIDTH; g++)
+		for (g = 0; g < FETCH_WIDTH; g++)
 		begin : lookup
 			logic [BTB_IDX_W - 1 : 0] rd_idx;
 			assign rd_idx = btb_index(i_rd_pc[g]);

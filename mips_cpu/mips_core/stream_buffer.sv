@@ -126,7 +126,7 @@ module stream_buffer #(
 	always_comb
 	begin
 		out.valid = hit;
-		for (int j = 0; j < FE_WIDTH; j++)
+		for (int j = 0; j < FETCH_WIDTH; j++)
 		begin
 			automatic int off = int'(cur_offset) + j;
 			out.word_valid[j] = hit && (off < LINE_SIZE);

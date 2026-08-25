@@ -70,8 +70,8 @@ module mips_core (
 	// stream buffer when the cache does not and the prefetcher ran far enough
 	// ahead to have the line.
 	logic fe_inst_valid;
-	logic [FE_WIDTH - 1 : 0] fe_word_valid;
-	logic [`DATA_WIDTH - 1 : 0] fe_inst_data [FE_WIDTH];
+	logic [FETCH_WIDTH - 1 : 0] fe_word_valid;
+	logic [`DATA_WIDTH - 1 : 0] fe_inst_data [FETCH_WIDTH];
 
 	dec_uop_t fe_uop [FE_WIDTH];
 	logic fe_stall;
@@ -171,7 +171,7 @@ module mips_core (
 	always_comb
 	begin
 		fe_inst_valid = if_i_cache_output.valid | if_sb_output.valid;
-		for (int j = 0; j < FE_WIDTH; j++)
+		for (int j = 0; j < FETCH_WIDTH; j++)
 		begin
 			fe_word_valid[j] = if_i_cache_output.valid
 				? if_i_cache_output.word_valid[j]
