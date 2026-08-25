@@ -443,28 +443,28 @@ run to completion with all three streams matching.**
 Cycle counts, lower is better. Instruction counts match the baseline exactly on every benchmark,
 so cycles and CPI carry all the information.
 
-| benchmark | baseline (in-order) | out-of-order core | + caches | + front end | + non-blocking | + memory speculation | **final** | speedup | IPC |
+| benchmark | baseline (in-order) | out-of-order core | + caches | + front end | + non-blocking | + memory speculation | **+ window sizing** | speedup | IPC |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| nqueens   | 1,722,402  | 1,609,896  | 890,370    | 807,339    | 764,041    | 763,961    | **763,743**    | **2.26×** | 1.33 |
-| quickSort | 9,572,553  | 7,740,489  | 5,492,808  | 5,240,726  | 4,528,689  | 4,235,844  | **3,890,402**  | **2.46×** | 1.05 |
-| esift2    | 21,375,975 | 17,254,324 | 5,814,714  | 4,834,600  | 4,835,486  | 4,835,486  | **4,835,486**  | **4.42×** | 1.62 |
-| coin      | 35,944,392 | —          | 34,162,087 | 27,294,090 | 26,211,879 | 26,212,489 | **26,212,464** | **1.37×** | 1.36 |
+| nqueens   | 1,722,402  | 1,609,896  | 890,370    | 807,339    | 764,041    | 763,961    | **763,332**    | **2.26×** | 1.33 |
+| quickSort | 9,572,553  | 7,740,489  | 5,492,808  | 5,240,726  | 4,528,689  | 4,235,844  | **3,495,796**  | **2.74×** | 1.17 |
+| esift2    | 21,375,975 | 17,254,324 | 5,814,714  | 4,834,600  | 4,835,486  | 4,835,486  | **4,835,133**  | **4.42×** | 1.62 |
+| coin      | 35,944,392 | —          | 34,162,087 | 27,294,090 | 26,211,879 | 26,212,489 | **25,207,827** | **1.43×** | 1.42 |
 
-Geometric mean **2.41×**. The columns are cumulative: the out-of-order core at the original 2 KB
+Geometric mean **2.50×**. The columns are cumulative: the out-of-order core at the original 2 KB
 caches, then 8 KB instruction cache and 4-way 16 KB data cache, then prediction moved into fetch
 with a branch target buffer and the D-cache port pipelined, then the data cache made non-blocking,
-then loads allowed to speculate past unresolved stores, and finally the physical register file
-doubled — which turned out to be [what was bounding the window](#what-actually-bounds-the-window)
-all along.
+then loads allowed to speculate past unresolved stores, and finally the window sized against
+[measured stall attribution](#what-actually-bounds-the-window) rather than guesswork —
+`PHYS_REGS` and `ROB_ENTRIES` to 128, `LSQ_ENTRIES` to 32.
 
 The last four columns are worth isolating, since they are where the recent work went:
 
-| benchmark | before front end work | + BTB in fetch | + pipelined D-cache port | + non-blocking D-cache | + memory speculation | + `PHYS_REGS` 128 | total |
+| benchmark | before front end work | + BTB in fetch | + pipelined D-cache port | + non-blocking D-cache | + memory speculation | + window sizing | total |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| nqueens   | 890,370    | 860,124    | 807,349    | 764,041    | 763,961    | **763,743**    | **1.17×** |
-| quickSort | 5,492,808  | 5,273,026  | 5,239,953  | 4,528,689  | 4,235,844  | **3,890,402**  | **1.41×** |
-| esift2    | 5,814,714  | 4,834,598  | 4,834,598  | 4,835,486  | 4,835,486  | **4,835,486**  | **1.20×** |
-| coin      | 34,162,087 | 28,492,663 | 27,294,122 | 26,211,879 | 26,212,489 | **26,212,464** | **1.30×** |
+| nqueens   | 890,370    | 860,124    | 807,349    | 764,041    | 763,961    | **763,332**    | **1.17×** |
+| quickSort | 5,492,808  | 5,273,026  | 5,239,953  | 4,528,689  | 4,235,844  | **3,495,796**  | **1.57×** |
+| esift2    | 5,814,714  | 4,834,598  | 4,834,598  | 4,835,486  | 4,835,486  | **4,835,133**  | **1.20×** |
+| coin      | 34,162,087 | 28,492,663 | 27,294,122 | 26,211,879 | 26,212,489 | **25,207,827** | **1.36×** |
 
 The changes are almost disjoint in what they fix, which is why each was worth doing separately.
 esift2's entire gain is the BTB. coin's is mostly the BTB with a tail from the memory port becoming
@@ -597,34 +597,73 @@ reason is arithmetic rather than subtle. The free list holds `PHYS_REGS - ARCH_R
 against a **64-entry** reorder buffer: the buffer physically could not fill, because the free list
 ran out at half its capacity first. On quickSort that accounted for 100% of every stalled cycle.
 
-Raising `PHYS_REGS` to 128 is the whole fix, and the isolation is exact:
+Raising `PHYS_REGS` to 128 is the whole fix at that point, and the isolation is exact:
 
 | quickSort configuration | cycles | |
 | --- | --- | --- |
-| `PHYS_REGS` 64, `IQ_ENTRIES` 32, `LSQ_ENTRIES` 16 | 4,235,844 | |
+| `PHYS_REGS` 64, `ROB_ENTRIES` 64, `LSQ_ENTRIES` 16 | 4,235,844 | |
 | `LSQ_ENTRIES` 32 alone | 4,235,844 | identical to the cycle |
 | **`PHYS_REGS` 128 alone** | **3,890,402** | **1.089×** |
 | `PHYS_REGS` 128 + `IQ_ENTRIES` 64 + `LSQ_ENTRIES` 32 | 3,890,402 | identical to `PHYS_REGS` alone |
 
-Doubling the issue queue and the load/store queue is worth exactly nothing, in both directions —
-the same cycle count to the digit. quickSort's IPC crosses 1.0 for the first time, at 1.055, and its
-speedup over the in-order baseline goes 2.26× to **2.46×**.
+Doubling the issue queue and the load/store queue is worth exactly nothing there, in both
+directions — the same cycle count to the digit.
 
-Two secondary signals confirm the machine is genuinely finding more to do rather than just stalling
-elsewhere: `Dmiss_regs_full` becomes non-zero for the first time in the project (451 cycles) and
-`Dmiss_refused` rises from 5 to 96 — with a wider window the four miss-status registers finally
-start to fill. Speculative loads rise from 22,990 to 30,713.
+#### Then the reorder buffer, and only then the queue
 
-The other three benchmarks gain nothing, which their stall columns predicted: their dispatch stalls
-are the load/store queue, and doubling *that* does not help either — esift2's LSQ stalls barely
-move (93,576 to 93,186) because the queue is full behind a commit blocked on memory, not short of
-capacity. Capacity is not what it is waiting for.
+With the free list no longer binding, quickSort's stalls became **100% reorder buffer** — 852,550
+cycles, the first time that structure had bound anything. Raising it is four lines and no RTL
+change, despite the note in this repository's history that said otherwise. The five errors
+Verilator reports at `ROB_ENTRIES = 128` are all `BLKLOOPINIT` on the same construct — a
+non-blocking assignment to an element of an *unpacked* array inside a `for` loop, in the reset and
+squash walks over `rob` and `rmt`. Verilator accepts that only when it can fully unroll the loop,
+and its default unroll budget is 64, which is exactly why the design elaborates at 64 entries and
+fails at 128. `--unroll-count 512 --unroll-stmts 100000` in the Makefile clears all five.
 
-**And the bottleneck moved.** quickSort's dispatch stalls are now 100% reorder buffer, 852,550
-cycles or 21.9% of the run, which is the first time that structure has bound anything. Raising
-`ROB_ENTRIES` past 64 is not a parameter change: it runs into the Verilator restrictions described
-under [synthesis and tool limits](#simulation), and needs the per-entry status bits hoisted out of
-the unpacked struct array into packed vectors first.
+| quickSort configuration | cycles | gain | vs in-order baseline |
+| --- | --- | --- | --- |
+| `PHYS_REGS` 64, `ROB_ENTRIES` 64, `LSQ_ENTRIES` 16 | 4,235,844 | — | 2.26× |
+| + `PHYS_REGS` 128 | 3,890,402 | 1.089× | 2.46× |
+| + `ROB_ENTRIES` 128 | 3,540,153 | 1.099× | 2.70× |
+| + `LSQ_ENTRIES` 32 | **3,495,796** | 1.013× | **2.74×** |
+
+`LSQ_ENTRIES` is the interesting row. Doubling it measured **exactly zero** at 64 reorder buffer
+entries and is worth 44,357 cycles at 128 — it only becomes visible once the structure in front of
+it stops being the constraint. Scaling everything at once would have credited the load/store queue
+with a win it does not deserve on its own; scaling one at a time in the wrong order would have
+written it off entirely. Attributing the stall first is what made the order obvious.
+
+And on **coin** the same `LSQ_ENTRIES` change is worth **1.04×** on its own — 26,212,464 to
+25,207,827, IPC 1.36 to 1.42 — because coin's dispatch stalls were 99.98% load/store queue all
+along. Its `rename_stall` falls from 2,105,364 to 819,124. That is the largest gain coin has seen
+since the branch target buffer, and it very nearly went unnoticed: the isolating runs were done on
+the three fast benchmarks, and coin was only measured at the end. **A parameter sweep that skips the
+slow benchmark is not a sweep.**
+
+nqueens and esift2 gain nothing from any of it, which their stall columns predicted: esift2's
+load/store queue stalls move only from 93,576 to 93,186, because there the queue is full behind a
+commit blocked on memory rather than short of capacity.
+
+#### Where it stops
+
+quickSort's remaining 322,121 stall cycles no longer have a single owner. They split across the
+reorder buffer (166,542), the **issue queue** (120,351, binding for the first time in this project)
+and the free list (32,218). There is no next parameter to turn. coin still stalls on the load/store
+queue for 818,731 cycles, so it has further to go, but doubling that queue again is the obvious
+thing to measure rather than to assume.
+
+What there is instead is a ceiling that these two changes walked the machine straight into:
+
+| | `Dmiss_regs_full` | `Dmiss_refused` |
+| --- | --- | --- |
+| before the window work | 0 | 5 |
+| `PHYS_REGS` 128 | 451 | 96 |
+| + `ROB_ENTRIES` 128 | 157,219 | 4,761 |
+| + `LSQ_ENTRIES` 32 | **174,208** (5.0% of cycles) | 8,112 |
+
+All four miss-status registers are now full for 5% of quickSort's run, and `NUM_MSHR` cannot simply
+be raised: the memory model accepts four outstanding reads **per AXI id**, and the D-cache uses one.
+Going further means giving it a second master id, which is design work rather than a parameter.
 
 ### Branch prediction accuracy
 
@@ -655,9 +694,9 @@ it, but still the window in which memory is the thing being waited on:
 | benchmark | IPC (ceiling 2.0) | D-cache misses | fill outstanding | I-cache stall | limited by |
 | --- | --- | --- | --- | --- | --- |
 | esift2    | 1.62 | 783    | 1.7%      | 0.05%  | the core |
-| coin      | 1.36 | 29     | 0.012%    | 0.011% | the core |
+| coin      | 1.42 | 29     | 0.012%    | 0.012% | the core, then the load/store queue |
 | nqueens   | 1.33 | 96     | 1.4%      | 2.2%   | branch accuracy |
-| quickSort | 1.05 | 22,186 | **34.9%** | 0.12%  | memory, and now the reorder buffer |
+| quickSort | 1.17 | 22,188 | **31.2%** | 0.14%  | the miss-status registers |
 
 #### How the front-end problem was found, and what fixing it did
 
@@ -694,29 +733,27 @@ is exactly what the pipelined D-cache port then relieved.
 
 #### What is left
 
-- **The reorder buffer, for the first time.** quickSort's dispatch stalls are now 100% reorder
-  buffer, 852,550 cycles or 21.9% of its run. Every other structure has been measured and cleared:
-  the free list is fixed, the issue queue and load/store queue were never binding. `ROB_ENTRIES`
-  past 64 is not a parameter change though — Verilator's `BLKLOOPINIT` rejects the reset loop at
-  128, so the per-entry status bits have to be hoisted into packed vectors first. The four
-  miss-status registers started filling under the wider window as well, so the two probably have to
-  move together.
-- **quickSort is still the worst of the four**, at IPC 1.05 against esift2's 1.62, and still the
-  only memory-bound one: 22,186 line fills against a 100-cycle memory on a single cache port, with
-  a fill outstanding 34.9% of the time.
-- **Prediction, not structures, is where coin and esift2 are.** Both hold 69% and 71% of cycles with
-  two ready instructions and issue two; they are at the width they have. Their dispatch stalls are
-  the load/store queue filling behind a commit blocked on memory, which doubling the queue does not
-  fix — measured, not assumed.
+- **The miss-status registers, and this one needs design work.** All four are full for 5.0% of
+  quickSort's run (`Dmiss_regs_full` 174,208 cycles, up from 0 before the window was sized) and
+  8,112 misses are refused outright. `NUM_MSHR` cannot simply be raised: the memory model accepts
+  four outstanding reads **per AXI id** and the D-cache uses one, so going further means giving it a
+  second master id. That is the clearest remaining ceiling on the one memory-bound benchmark.
+- **coin still stalls on the load/store queue** for 818,731 cycles, 3.2% of its run, even at 32
+  entries — doubling it was worth 1.04× and there may be more there. Worth measuring at 64 rather
+  than assuming either way, which is the lesson of the row above it.
+- **quickSort's remaining stalls have no single owner**: reorder buffer 166,542, issue queue
+  120,351, free list 32,218. The issue queue binding at all is new. There is no next parameter.
+- **nqueens is limited by branch accuracy** and nothing structural: 8,548 dispatch stalls in its
+  entire run, 1.1% of cycles.
 - **nqueens is limited by branch accuracy**, at 76.3%. It is the one benchmark where a stronger
   direction predictor (TAGE) would pay; on coin and esift2 the tournament predictor is already at
   98% and there is nothing to win.
-- **esift2 and coin are core limited** at IPC 1.62 and 1.36 against a ceiling of 2.0. What is left
+- **esift2 and coin are core limited** at IPC 1.62 and 1.42 against a ceiling of 2.0. What is left
   there is issue width and dependence chains, not any single structure.
 
 For reference, the in-order baseline runs coin at IPC 0.995 — 99.5% of *its* ceiling. coin was the
-benchmark this design served worst, at 1.05×; it is now 1.37×, and the gap that closed was almost
-entirely front end.
+benchmark this design served worst, at 1.05×; it is now 1.43×. Most of that gap was the front end,
+and the last 1.04× of it was a load/store queue that had been half the size it needed to be.
 
 Window occupancy was measured directly to answer whether a **wider machine** would help, by
 counting how many issue-queue entries are ready each cycle. All of it is measured on the final
@@ -725,10 +762,10 @@ for:
 
 | benchmark | ≥1 ready | ≥2 | ≥3 | ≥4 | ≥2 memory ops | fetch starved |
 | --- | --- | --- | --- | --- | --- | --- |
-| esift2    | 91.8% | 71.4% | 23.4% | ~0    | ~0    | 0.4% |
-| coin      | 78.6% | 69.3% | 13.1% | 3.7%  | 12.0% | 0.6% |
-| nqueens   | 85.4% | 65.4% | 44.9% | 19.0% | 20.3% | 7.7% |
-| quickSort | 71.0% | 51.5% | 26.0% | 4.1%  | 1.3%  | 3.5% |
+| esift2    | 91.7% | 71.4% | 23.4% | ~0    | ~0    | 0.4% |
+| coin      | 78.5% | 71.7% | 20.9% | 12.4% | 17.9% | 0.6% |
+| nqueens   | 85.4% | 65.4% | 44.9% | 19.1% | 20.4% | 7.7% |
+| quickSort | 82.5% | 59.5% | 29.8% | 4.6%  | 1.6%  | 4.0% |
 
 Three or more instructions are ready on 13.1% of coin's cycles and 23.4% of esift2's, so **4-wide is
 not worth it** — the parallelism to feed it is not in the window. Nor is **wider fetch**: the front

@@ -1,7 +1,7 @@
 .PHONY: clean verilate simulate dump wave
 
 verilate:
-	bash -c "source $(CSE148_TOOLS)/oss-cad-suite/environment && verilator --cc --exe --build --trace-fst -DSIMULATION -Imips_core -f verilator_files --top-module mips_core verilator_main.cpp memory.cpp memory_driver.cpp -Wno-fatal"
+	bash -c "source $(CSE148_TOOLS)/oss-cad-suite/environment && verilator --cc --exe --build --trace-fst --unroll-count 512 --unroll-stmts 100000 -DSIMULATION -Imips_core -f verilator_files --top-module mips_core verilator_main.cpp memory.cpp memory_driver.cpp -Wno-fatal"
 
 simulate:
 	obj_dir/Vmips_core

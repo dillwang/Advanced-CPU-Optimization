@@ -100,11 +100,18 @@ typedef enum logic {
 parameter int PHYS_REGS    = 128;
 parameter int PRF_IDX_W    = 7;		// $clog2(PHYS_REGS)
 parameter int ARCH_REGS    = 32;
-parameter int ROB_ENTRIES  = 64;
-parameter int ROB_IDX_W    = 6;		// $clog2(ROB_ENTRIES)
+// The reset and squash loops over `rob` and `rmt` are non-blocking assignments
+// to an unpacked array inside a for loop, which the simulator accepts only if
+// it can fully unroll them -- and its default unroll budget is 64. Past that it
+// reports BLKLOOPINIT. The Makefile therefore passes --unroll-count, which is
+// all this needs; there is nothing wrong with the model.
+parameter int ROB_ENTRIES  = 128;
+parameter int ROB_IDX_W    = 7;		// $clog2(ROB_ENTRIES)
 parameter int IQ_ENTRIES   = 32;
-parameter int LSQ_ENTRIES  = 16;
-parameter int LSQ_IDX_W    = 4;		// $clog2(LSQ_ENTRIES)
+// Only worth anything once the reorder buffer is no longer the constraint: at
+// 64 reorder buffer entries, doubling this measured zero to the cycle.
+parameter int LSQ_ENTRIES  = 32;
+parameter int LSQ_IDX_W    = 5;		// $clog2(LSQ_ENTRIES)
 parameter int FE_WIDTH     = 2;		// fetch / rename / dispatch / commit width
 parameter int ISSUE_WIDTH  = 2;		// instructions started per cycle
 // One writeback port per issue port for the ALUs, plus one for load data
