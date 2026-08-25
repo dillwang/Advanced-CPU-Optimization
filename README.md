@@ -443,21 +443,21 @@ run to completion with all three streams matching.**
 Cycle counts, lower is better. Instruction counts match the baseline exactly on every benchmark,
 so cycles and CPI carry all the information.
 
-| benchmark | baseline (in-order) | out-of-order core | + caches | + front end | + non-blocking | + memory spec. | + window sizing | **+ wide fetch** | speedup | IPC |
+| benchmark | baseline (in-order) | + caches | + front end | + non-blocking | + memory spec. | + window sizing | + wide fetch | **+ 3-wide** | speedup | IPC |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| nqueens   | 1,722,402  | 1,609,896  | 890,370    | 807,339    | 764,041    | 763,961    | 763,332    | **757,970**    | **2.27×** | 1.34 |
-| quickSort | 9,572,553  | 7,740,489  | 5,492,808  | 5,240,726  | 4,528,689  | 4,235,844  | 3,495,796  | **3,400,154**  | **2.82×** | 1.21 |
-| esift2    | 21,375,975 | 17,254,324 | 5,814,714  | 4,834,600  | 4,835,486  | 4,835,486  | 4,835,133  | **4,557,362**  | **4.69×** | 1.72 |
-| coin      | 35,944,392 | —          | 34,162,087 | 27,294,090 | 26,211,879 | 26,212,489 | 25,207,827 | **21,405,644** | **1.68×** | 1.67 |
+| nqueens   | 1,722,402  | 890,370    | 807,339    | 764,041    | 763,961    | 763,332    | 757,970    | **647,872**    | **2.66×** | 1.57 |
+| quickSort | 9,572,553  | 5,492,808  | 5,240,726  | 4,528,689  | 4,235,844  | 3,495,796  | 3,400,154  | **3,050,477**  | **3.14×** | 1.35 |
+| esift2    | 21,375,975 | 5,814,714  | 4,834,600  | 4,835,486  | 4,835,486  | 4,835,133  | 4,557,362  | **3,333,506**  | **6.41×** | **2.36** |
+| coin      | 35,944,392 | 34,162,087 | 27,294,090 | 26,211,879 | 26,212,489 | 25,207,827 | 21,405,644 | **17,682,190** | **2.03×** | **2.02** |
 
-Geometric mean **2.66×**. The columns are cumulative: the out-of-order core at the original 2 KB
+Geometric mean **3.23×**, with two benchmarks past IPC 2.0 against a ceiling that is now 3.0. The columns are cumulative: the out-of-order core at the original 2 KB
 caches, then 8 KB instruction cache and 4-way 16 KB data cache, then prediction moved into fetch
 with a branch target buffer and the D-cache port pipelined, then the data cache made non-blocking,
 then loads allowed to speculate past unresolved stores, then the window sized against
 [measured stall attribution](#what-actually-bounds-the-window) rather than guesswork —
-`PHYS_REGS` and `ROB_ENTRIES` to 128, `LSQ_ENTRIES` to 32 — and finally
-[fetch made wider than decode](#fetching-wider-than-decode), which was the largest single step of
-the four and the one that had been argued against on the strength of the wrong counter.
+`PHYS_REGS` and `ROB_ENTRIES` to 128, `LSQ_ENTRIES` to 32 — then
+[fetch made wider than decode](#fetching-wider-than-decode), and finally the whole machine
+[widened to three](#going-three-wide) once fetch could feed it.
 
 The last four columns are worth isolating, since they are where the recent work went:
 
@@ -671,6 +671,39 @@ chains, and would ordinarily be answered with a deeper window or a wider issue s
 **entirely** an artefact of a window that could not accumulate at 1.42 arrivals per cycle, and
 feeding the same back end properly made it vanish.
 
+### Going three wide
+
+Widening the machine had been rejected twice, both times on the same evidence: three or more
+instructions were ready on only 8.8% of coin's cycles and 23.4% of esift2's, so there was nothing
+to feed a third slot with. That was true, and it stopped being true the moment fetch stopped
+starving the window:
+
+| coin, entries ready | before wide fetch | after |
+| --- | --- | --- |
+| ≥2 | 71.7% | 84.8% |
+| **≥3** | 20.9% | **38.4%** |
+| ≥4 | 12.4% | 16.0% |
+| ready but could not start | 1.4% | **4.5%** |
+
+Both widths are single parameters — the ALUs, register file ports and writeback ports are all
+generate loops over `ISSUE_WIDTH`, and decode, rename, dispatch and commit are all loops over
+`FE_WIDTH` — so the two were measured separately, which turned out to matter:
+
+| benchmark | 2-wide | `ISSUE_WIDTH` 3 only | + `FE_WIDTH` 3 |
+| --- | --- | --- | --- |
+| nqueens   | 757,970    | 720,143 (1.053×)    | **647,872** (1.112×) |
+| quickSort | 3,400,154  | 3,331,071 (1.021×)  | **3,050,477** (1.092×) |
+| esift2    | 4,557,362  | 4,521,289 (1.008×)  | **3,333,506** (1.356×) |
+| coin      | 21,405,644 | 21,405,604 (**1.000×**) | **17,682,190** (1.211×) |
+
+coin is the instructive row. A third issue slot on its own bought it **40 cycles**, because dispatch
+and commit still capped it at two per cycle — the machine issued three on many cycles and could not
+retire them any faster. Widening the rest of the pipeline released it for 1.21×. A wider issue stage
+is worth nothing without a wider front end to feed it and a wider commit to drain it, and the two
+measured separately say so exactly.
+
+esift2 reaches **IPC 2.356** and coin **2.023**, both clean through the old two-wide ceiling.
+
 ### What actually bounds the window
 
 Widening the window was on the dead-end list at 1.02×, and that turned out to be an artefact: the
@@ -789,12 +822,12 @@ moved again, and it is now different on each benchmark. The D-cache column is th
 with at least one line fill outstanding — no longer a stall, since the core keeps running through
 it, but still the window in which memory is the thing being waited on:
 
-| benchmark | IPC (ceiling 2.0) | D-cache misses | fill outstanding | I-cache stall | limited by |
-| --- | --- | --- | --- | --- | --- |
-| esift2    | **1.72** | 783    | 1.9%      | 0.05%  | issue width, 86% of ceiling |
-| coin      | **1.67** | 29     | 0.015%    | 0.014% | issue width, 84% of ceiling |
-| nqueens   | 1.34 | 96     | 1.4%      | 2.2%   | branch accuracy |
-| quickSort | 1.21 | 22,188 | ~32%      | 0.14%  | the miss-status registers |
+| benchmark | IPC (ceiling 3.0) | D-cache misses | I-cache stall | limited by |
+| --- | --- | --- | --- | --- |
+| esift2    | **2.36** | 783    | 0.07%  | 79% of ceiling |
+| coin      | **2.02** | 29     | 0.017% | the group cut in decode, then `IQ_ENTRIES` |
+| nqueens   | 1.57 | 96     | 2.6%   | branch accuracy |
+| quickSort | 1.35 | 22,188 | 0.16%  | the miss-status registers |
 
 #### How the front-end problem was found, and what fixing it did
 
@@ -859,13 +892,15 @@ is exactly what the pipelined D-cache port then relieved.
 - **nqueens is limited by branch accuracy**, at 76.3%. It is the one benchmark where a stronger
   direction predictor (TAGE) would pay; on coin and esift2 the tournament predictor is already at
   98% and there is nothing to win.
-- **esift2 and coin are core limited** at IPC 1.72 and 1.67 against a ceiling of 2.0 — 86% and 84%
-  of it. What is left there is issue width and dependence chains, not any single structure.
+- **esift2 and coin are at IPC 2.36 and 2.02** against a ceiling that is now 3.0. What is left on
+  coin is measured and specific: it accepts a single instruction on 32.3% of cycles because the
+  decode group ends at every control instruction, and `IQ_ENTRIES` binds for 1,549,018 cycles.
 
 For reference, the in-order baseline runs coin at IPC 0.995 — 99.5% of *its* ceiling. coin was the
-benchmark this design served worst, at 1.05×; it is now **1.68×** at IPC 1.67. Essentially all of
-that gap was the front end — first predicting in fetch with a target buffer, then fetching wider
-than decode — and almost none of it was the out-of-order machinery it was originally blamed on.
+benchmark this design served worst, at 1.05×; it is now **2.03× at IPC 2.02**. Essentially all of
+that gap was the front end — predicting in fetch with a target buffer, then fetching wider than
+decode, then widening the machine once fetch could feed it — and almost none of it was the
+out-of-order machinery it was originally blamed on.
 
 Window occupancy was measured directly to answer whether a **wider machine** would help, by
 counting how many issue-queue entries are ready each cycle. All of it is measured on the final

@@ -819,11 +819,13 @@ module rename_rob (
 			if (n_live == 0) stats_event("fe_offer_0");
 			if (n_live == 1) stats_event("fe_offer_1");
 			if (n_live == 2) stats_event("fe_offer_2");
+			if (n_live == 3) stats_event("fe_offer_3");
 			// And how many actually got in.
 			if (dispatch_go)
 			begin
 				if (live_n == 1) stats_event("disp_1");
 				if (live_n == 2) stats_event("disp_2");
+				if (live_n == 3) stats_event("disp_3");
 			end
 			// Which resource ran out. A stalled cycle can be short of more than
 			// one, so these sum to more than rename_stall.

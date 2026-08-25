@@ -112,7 +112,7 @@ parameter int IQ_ENTRIES   = 32;
 // 64 reorder buffer entries, doubling this measured zero to the cycle.
 parameter int LSQ_ENTRIES  = 32;
 parameter int LSQ_IDX_W    = 5;		// $clog2(LSQ_ENTRIES)
-parameter int FE_WIDTH     = 2;		// decode / rename / dispatch / commit width
+parameter int FE_WIDTH     = 3;		// decode / rename / dispatch / commit width
 // How many words fetch pulls out of the instruction cache per cycle. This is
 // deliberately wider than FE_WIDTH and is the whole point of the fetch buffer:
 // at two words a fetch pair straddling the end of a cache line delivers one
@@ -123,7 +123,7 @@ parameter int FE_WIDTH     = 2;		// decode / rename / dispatch / commit width
 // both, and decode still takes FE_WIDTH per cycle off the other end.
 // Must not exceed the instruction cache's LINE_SIZE.
 parameter int FETCH_WIDTH  = 4;
-parameter int ISSUE_WIDTH  = 2;		// instructions started per cycle
+parameter int ISSUE_WIDTH  = 3;		// instructions started per cycle
 // One writeback port per issue port for the ALUs, plus one for load data
 // returning from the load/store queue an arbitrary number of cycles later.
 parameter int NUM_WB       = ISSUE_WIDTH + 1;

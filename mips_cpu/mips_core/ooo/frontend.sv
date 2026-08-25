@@ -583,6 +583,7 @@ module frontend (
 			// And what it handed on.
 			if (accept_n == 1) stats_event("fe_accept_1");
 			if (accept_n == 2) stats_event("fe_accept_2");
+			if (accept_n == 3) stats_event("fe_accept_3");
 		end
 	end
 `endif
