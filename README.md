@@ -323,16 +323,33 @@ still only reaches IPC 1.05, so it measures what the core alone is leaving on th
 in-order baseline runs coin at IPC 0.995, i.e. at 99.5% of *its* ceiling, which is why the
 out-of-order machine only gains 1.05× there.
 
-A concrete suspect, stated as a hypothesis rather than a conclusion: the load/store queue walks
-every access through `M_IDLE -> M_LOAD -> M_IDLE`, because the D-cache SRAM must be addressed via
-`addr_next` one cycle before `addr`. That means even a cache **hit** occupies the memory port for
-two cycles, capping memory throughput at 0.5 accesses per cycle. coin's instruction mix is 31.1%
-memory operations, so that cap alone limits it to IPC 1.61, and it achieves 1.05. The D-cache is a
-one-cycle-hit design and could accept an address every cycle; the round trip through idle is an
-artifact of the queue, not of the cache. Pipelining it is the most promising core-side change.
+coin makes the front end's cost visible, because nothing else is in the way. It records
+**7,224,093 fetch-starved cycles** -- 21% of its run with the fetch buffer empty -- against an
+instruction cache miss rate of 0.009%. The cache is not the cause. It also retires 7,181,552
+conditional branches, so there is very nearly **one starved cycle per branch**.
 
-Cheap way to confirm before building it: count cycles in which the issue queue holds a ready memory
-operation while `lsq_load_free` is low.
+That ratio points straight at where prediction happens. A branch is predicted in *decode*, so a
+redirect is discovered a cycle after those instructions were fetched, and taking it flushes the
+fetch buffer. Fetch supplies at most two words per cycle and rename consumes at most two, so there
+is no slack to absorb the refill and the buffer runs dry for a cycle. coin is loop-dominated, so
+nearly every branch is taken and nearly every branch costs that cycle.
+
+Moving prediction into fetch with a branch target buffer removes the flush entirely: the program
+counter is redirected in the cycle the branch is fetched, so no wrong-path instruction ever enters
+the buffer. On coin that is worth up to 7 M of 34 M cycles.
+
+Branch *accuracy* is not the problem on coin -- the tournament predictor gets 98.0% there. Nor is
+the reorder buffer: `rename_stall` is 7.9%.
+
+A second, smaller limit is the load/store queue, which walks every access through
+`M_IDLE -> M_LOAD -> M_IDLE` because the D-cache SRAM must be addressed via `addr_next` a cycle
+before `addr`. Even a **hit** therefore occupies the memory port for two cycles, capping throughput
+at 0.5 accesses per cycle. coin runs at 0.326, i.e. 65% of that cap. The D-cache is a one-cycle-hit
+design and could accept an address every cycle; the round trip through idle is an artifact of the
+queue.
+
+For reference, the in-order baseline runs coin at IPC 0.995 -- 99.5% of *its* ceiling -- which is
+why the out-of-order machine only gains 1.05x there. coin is the benchmark this design serves worst.
 
 # Simulation
 
