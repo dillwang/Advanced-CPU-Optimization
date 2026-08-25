@@ -122,9 +122,17 @@ parameter int BTB_IDX_W    = 9;		// $clog2(BTB_ENTRIES)
 // mean that this same pc was decoded as a direct branch or jump before.
 parameter int BTB_TAG_W    = 26 - BTB_IDX_W - 2;	// ADDR_WIDTH - index - 2
 
+// Miss status holding registers. This is how many D-cache line fills may be in
+// flight at once, and so how many independent misses can overlap instead of
+// serialising. The memory model accepts 4 reads per master id, so 4 is the most
+// the interface can carry.
+parameter int NUM_MSHR   = 4;
+parameter int MSHR_IDX_W = 2;		// $clog2(NUM_MSHR)
+
 typedef logic [PRF_IDX_W - 1 : 0] preg_t;
 typedef logic [ROB_IDX_W - 1 : 0] rob_idx_t;
 typedef logic [LSQ_IDX_W - 1 : 0] lsq_idx_t;
+typedef logic [MSHR_IDX_W - 1 : 0] mshr_id_t;
 
 // Physical register 0 is never allocated and never written, so it reads as a
 // hard zero. The decoder already clears uses_r* for architectural register
