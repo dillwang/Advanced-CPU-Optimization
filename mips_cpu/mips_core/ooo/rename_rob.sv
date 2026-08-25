@@ -126,6 +126,7 @@ module rename_rob (
 		preg_t old_pd;
 
 		logic is_branch;		// conditional branch, trains the predictor
+		logic bp_valid;			// the predictor really was consulted for it
 		mips_core_pkg::BranchOutcome prediction;
 		mips_core_pkg::BranchOutcome outcome;
 		logic [BP_IDX_W - 1 : 0] bp_index;
@@ -236,7 +237,7 @@ module rename_rob (
 				can = (k == 0) ? st_done : 1'b0;
 
 			// The predictor has a single training port per cycle.
-			if (can && rob[idx].is_branch && saw_branch)
+			if (can && rob[idx].is_branch && rob[idx].bp_valid && saw_branch)
 				can = 1'b0;
 
 			// Never retire past the delay slot of a branch that is redirecting
@@ -254,7 +255,7 @@ module rename_rob (
 			begin
 				commit_en[k] = 1'b1;
 				n_commit = n_commit + 1'b1;
-				if (rob[idx].is_branch)
+				if (rob[idx].is_branch && rob[idx].bp_valid)
 					saw_branch = 1'b1;
 				if (rob[idx].is_done)
 					saw_done = 1'b1;
@@ -288,7 +289,12 @@ module rename_rob (
 
 		for (int k = 0; k < FE_WIDTH; k++)
 		begin
-			if (commit_en[k] && rob[commit_idx[k]].is_branch)
+			// A branch whose target buffer entry missed was never looked up in
+			// the predictor, so it carries no index or history and there is
+			// nothing to train with. Filling the target buffer is what it
+			// accomplishes; it predicts properly from its next execution on.
+			if (commit_en[k] && rob[commit_idx[k]].is_branch
+				&& rob[commit_idx[k]].bp_valid)
 			begin
 				fb_valid = 1'b1;
 				fb_pc = rob[commit_idx[k]].pc;
@@ -310,7 +316,7 @@ module rename_rob (
 	// only written on this same clock edge.
 	assign rec_valid = red_hit;
 	assign rec_hist = rob[red_idx].bp_hist;
-	assign rec_shift = rob[red_idx].is_branch;
+	assign rec_shift = rob[red_idx].is_branch & rob[red_idx].bp_valid;
 	assign rec_outcome = red_outcome;
 
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -411,6 +417,7 @@ module rename_rob (
 				disp_uop[k].prediction = fe_uop[k].prediction;
 				disp_uop[k].recovery_target = fe_uop[k].recovery_target;
 				disp_uop[k].seq_target = fe_uop[k].pc + `ADDR_WIDTH'd8;
+				disp_uop[k].bp_valid = fe_uop[k].bp_valid;
 				disp_uop[k].bp_index = fe_uop[k].bp_index;
 				disp_uop[k].bp_hist = fe_uop[k].bp_hist;
 				disp_uop[k].bp_weak = fe_uop[k].bp_weak;
@@ -536,6 +543,7 @@ module rename_rob (
 						rob[di].is_branch <= disp_uop[k].is_branch;
 						rob[di].prediction <= disp_uop[k].prediction;
 						rob[di].outcome <= NOT_TAKEN;
+						rob[di].bp_valid <= disp_uop[k].bp_valid;
 						rob[di].bp_index <= disp_uop[k].bp_index;
 						rob[di].bp_hist <= disp_uop[k].bp_hist;
 						rob[di].bp_weak <= disp_uop[k].bp_weak;

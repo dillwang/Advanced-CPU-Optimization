@@ -44,9 +44,12 @@ module d_cache #(
     parameter ASSOCIATIVITY = 4,
     // Prefetch degree: how far ahead of the detected stride to fetch.
     parameter PREFETCH_DEGREE = 1,
-    // Set to 0 to build the same cache with the prefetcher removed, which is
-    // how its contribution is separated from the cache geometry.
-    parameter ENABLE_PREFETCH = 1
+    // Set to 1 to build the stride prefetcher in. It is off by default because
+    // it was measured to be worth nothing on these benchmarks: 0.09% on
+    // quickSort and 245 cycles on esift2 even at 8 KB, where capacity pressure
+    // is at its worst, and 13 issued prefetches across the whole of coin. The
+    // logic is correct and stays here so the ablation reproduces.
+    parameter ENABLE_PREFETCH = 0
     )(
     // General signals
     input clk,    // Clock

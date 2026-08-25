@@ -1,24 +1,45 @@
 /*
  * frontend.sv
  *
- * The in-order front end: fetch, a decoupling fetch buffer, decode, branch
- * prediction, and the control logic that decides how many instructions to hand
- * to rename each cycle.
+ * The in-order front end: fetch, branch prediction, a decoupling fetch buffer,
+ * decode, and the control logic that decides how many instructions to hand to
+ * rename each cycle.
  *
  * The fetch buffer is what makes a wide front end tractable. Fetch pushes
  * whatever the instruction cache returns for the current line, and decode pops
  * from the other end, so the two do not have to agree on a count in the same
  * cycle and a cache miss does not immediately starve rename.
  *
- * Delay slots drive most of the rules here. MIPS runs the instruction after a
- * branch or jump whichever way the branch goes, so a redirect must not take
- * effect until that instruction has been accepted:
- *   - if the delay slot is already in this decode group, accept both and
- *     redirect immediately,
- *   - otherwise accept up to the branch, remember the target, and redirect
- *     after the next cycle accepts the delay slot.
- * A group is also cut after the first conditional branch, so there is only ever
- * one prediction to make per cycle.
+ * Prediction happens in fetch, not decode. A branch target buffer is probed
+ * with the pc being fetched, in parallel with the instruction cache access for
+ * that same pc, and answers whether the instruction there is a control
+ * instruction and where it goes. If it is, and the direction predictor says
+ * taken, the next fetch address is already the target. Nothing on the wrong
+ * path is ever fetched, so nothing has to be thrown away: the fetch buffer
+ * keeps its contents across a taken branch instead of draining and refilling
+ * from empty. Predicting in decode instead costs a flush per taken branch,
+ * which on a loop heavy program is very nearly a lost cycle per branch.
+ *
+ * Decode still checks the front end's work, because the target buffer can miss.
+ * Each fetch buffer entry records where fetch went after it, decode computes
+ * where it should have gone, and a redirect is raised only when the two differ.
+ * A static branch therefore misses once, is filled into the target buffer from
+ * decode, and costs nothing from then on. jr and jalr never enter the target
+ * buffer at all -- their target comes out of a register and changes from one
+ * execution to the next -- so they keep taking their redirect from execute.
+ *
+ * Delay slots drive most of the remaining rules. MIPS runs the instruction
+ * after a branch or jump whichever way the branch goes, so a redirect must not
+ * take effect until that instruction has been dealt with. That now applies in
+ * both places:
+ *   - in fetch, if the delay slot did not come back from the cache in the same
+ *     cycle as its branch, the target is held in pend_fe and fetch spends one
+ *     more cycle going sequentially to pick the delay slot up,
+ *   - in decode, the same idea with pend_valid, for the redirects that fetch
+ *     did not already handle.
+ * A group is also cut after any control instruction and its delay slot, so
+ * there is only ever one prediction in flight per cycle and a squash can never
+ * cut between a branch and its delay slot.
  */
 `include "mips_core.svh"
 
@@ -59,11 +80,28 @@ module frontend (
 	localparam int FB_DEPTH = 8;
 	localparam int FB_IDX_W = 3;
 
+	// What fetch decided about one instruction, carried alongside it through
+	// the fetch buffer so that decode can check the decision and commit can
+	// train the predictor with exactly the state that produced it.
+	typedef struct packed {
+		logic btb_hit;					// the target buffer knew this pc
+		logic [`ADDR_WIDTH - 1 : 0] btb_target;
+		logic redir;					// fetch steered to btb_target after it
+		logic bp_valid;					// the direction predictor was consulted
+		logic bp_taken;
+		logic [BP_IDX_W - 1 : 0] bp_index;
+		logic [BP_HISTORY - 1 : 0] bp_hist;
+		logic bp_weak;
+		mips_core_pkg::BranchOutcome bp_perc;
+		mips_core_pkg::BranchOutcome bp_gshare;
+	} fe_pred_t;
+
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 	// |||| Fetch buffer
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 	logic [`ADDR_WIDTH - 1 : 0] fb_pc [FB_DEPTH];
 	logic [`DATA_WIDTH - 1 : 0] fb_inst [FB_DEPTH];
+	fe_pred_t fb_pred [FB_DEPTH];
 	logic [FB_IDX_W - 1 : 0] fb_head, fb_tail;
 	logic [FB_IDX_W : 0] fb_count;
 
@@ -74,8 +112,85 @@ module frontend (
 
 	assign o_pc_current = pc_reg;
 
+	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+	// |||| Branch target buffer lookup
+	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+	logic [`ADDR_WIDTH - 1 : 0] fetch_pc [FE_WIDTH];
+	logic btb_hit [FE_WIDTH];
+	logic btb_uncond [FE_WIDTH];
+	logic [`ADDR_WIDTH - 1 : 0] btb_target [FE_WIDTH];
+
+	logic btb_wr_valid;
+	logic [`ADDR_WIDTH - 1 : 0] btb_wr_pc;
+	logic [`ADDR_WIDTH - 1 : 0] btb_wr_target;
+	logic btb_wr_uncond;
+
+	genvar gf;
+	generate
+		for (gf = 0; gf < FE_WIDTH; gf++)
+		begin : fetch_addr
+			assign fetch_pc[gf] = pc_reg + `ADDR_WIDTH'(gf << 2);
+		end
+	endgenerate
+
+	btb BTB (
+		.clk, .rst_n,
+		.i_rd_pc     (fetch_pc),
+		.o_hit       (btb_hit),
+		.o_uncond    (btb_uncond),
+		.o_target    (btb_target),
+		.i_wr_valid  (btb_wr_valid),
+		.i_wr_pc     (btb_wr_pc),
+		.i_wr_target (btb_wr_target),
+		.i_wr_uncond (btb_wr_uncond)
+	);
+
+	// pend_fe holds a fetch redirect whose delay slot had not come back from
+	// the cache yet. While it is set, fetch pushes exactly the delay slot and
+	// then takes the redirect.
+	logic pend_fe_valid;
+	logic [`ADDR_WIDTH - 1 : 0] pend_fe_pc;
+
+	// The first fetched word this cycle that the target buffer recognises. Only
+	// one is acted on: the word after it is that branch's delay slot, and a
+	// branch inside a delay slot is not something MIPS defines.
+	logic hit_found;
+	logic [2:0] hit_slot;
+
+	always_comb
+	begin
+		hit_found = 1'b0;
+		hit_slot = '0;
+		if (!pend_fe_valid)
+		begin
+			for (int j = FE_WIDTH - 1; j >= 0; j--)
+			begin
+				if (btb_hit[j])
+				begin
+					hit_found = 1'b1;
+					hit_slot = 3'(j);
+				end
+			end
+		end
+	end
+
+	// Fetch never runs past the delay slot of a recognised branch, so an
+	// unpredicted branch can never slip into the buffer behind a predicted one.
+	// At FE_WIDTH = 2 the limit is never actually binding, but it is what makes
+	// the one-prediction-per-cycle rule safe at any width.
+	logic [2:0] push_limit;
+	always_comb
+	begin
+		if (pend_fe_valid)
+			push_limit = 3'd1;
+		else if (hit_found)
+			push_limit = hit_slot + 3'd2;
+		else
+			push_limit = 3'(FE_WIDTH);
+	end
+
 	// How many words the cache can give us for this line, limited by room in
-	// the buffer.
+	// the buffer and by the branch limit above.
 	always_comb
 	begin
 		push_n = '0;
@@ -86,21 +201,104 @@ module frontend (
 				// Words must be contiguous: stop at the first one that falls
 				// outside the cache line.
 				if (i_word_valid[j] && (3'({1'b0, push_n}) == 3'(j))
-					&& ({1'b0, fb_count} + {1'b0, push_n} + 1 <= FB_DEPTH))
+					&& ({1'b0, fb_count} + {1'b0, push_n} + 1 <= FB_DEPTH)
+					&& (push_n < push_limit))
 					push_n = push_n + 1'b1;
 			end
 		end
 	end
 
+	// The direction predictor is consulted for a recognised conditional branch
+	// that is actually entering the buffer this cycle. That is exactly once per
+	// fetched branch, which is what keeps the speculative global history in
+	// step with the instruction stream.
+	// The recognised entry, muxed out of the per-slot lookup results. An
+	// unpacked array cannot be indexed by a wide value, so this is a scan.
+	logic hit_uncond;
+	logic [`ADDR_WIDTH - 1 : 0] hit_target;
+	logic [`ADDR_WIDTH - 1 : 0] hit_pc;
+
+	always_comb
+	begin
+		hit_uncond = 1'b0;
+		hit_target = '0;
+		hit_pc = fetch_pc[0];
+		for (int j = 0; j < FE_WIDTH; j++)
+		begin
+			if (3'(j) == hit_slot)
+			begin
+				hit_uncond = btb_uncond[j];
+				hit_target = btb_target[j];
+				hit_pc = fetch_pc[j];
+			end
+		end
+	end
+
+	logic branch_pushed;
+	assign branch_pushed = hit_found && (push_n > hit_slot);
+	assign bp_req_valid = branch_pushed && !hit_uncond;
+	assign bp_req_pc = hit_pc;
+
+	logic fe_taken;
+	assign fe_taken = branch_pushed && (hit_uncond || (bp_prediction == TAKEN));
+
+	// Did the delay slot make it into the buffer in the same cycle?
+	logic slot_pushed;
+	assign slot_pushed = (push_n > (hit_slot + 3'd1));
+
+	logic set_pend_fe;
+	assign set_pend_fe = fe_taken && !slot_pushed;
+
+	logic [`ADDR_WIDTH - 1 : 0] fetch_next_pc;
+
+	always_comb
+	begin
+		if (pend_fe_valid && (push_n != 0))
+			fetch_next_pc = pend_fe_pc;			// delay slot taken, now go
+		else if (fe_taken && slot_pushed)
+			fetch_next_pc = hit_target;
+		else
+			fetch_next_pc = pc_reg + (`ADDR_WIDTH'(push_n) << 2);
+	end
+
 	// A decode redirect only counts once rename has actually taken the branch.
 	// Redirecting while rename is stalled would move the pc away from the delay
 	// slot that has not been accepted yet.
+	logic dec_redirect;
+	logic [`ADDR_WIDTH - 1 : 0] dec_redirect_pc;
 	logic dec_redirect_go;
 	assign dec_redirect_go = dec_redirect && !fe_stall;
 
 	assign o_pc_next = ex_redirect_valid ? ex_redirect_pc
-		: (dec_redirect_go ? dec_redirect_pc
-			: pc_reg + (`ADDR_WIDTH'(push_n) << 2));
+		: (dec_redirect_go ? dec_redirect_pc : fetch_next_pc);
+
+	// What gets written into each buffer slot filled this cycle. Only the
+	// recognised branch carries a prediction; every entry records the live
+	// history, so that a jr redirect can restore it too and not only a branch.
+	fe_pred_t push_pred [FE_WIDTH];
+	always_comb
+	begin
+		for (int j = 0; j < FE_WIDTH; j++)
+		begin
+			push_pred[j] = '0;
+			push_pred[j].bp_perc = NOT_TAKEN;
+			push_pred[j].bp_gshare = NOT_TAKEN;
+			push_pred[j].bp_hist = bp_hist;
+
+			if (hit_found && (3'(j) == hit_slot))
+			begin
+				push_pred[j].btb_hit = 1'b1;
+				push_pred[j].btb_target = hit_target;
+				push_pred[j].redir = fe_taken;
+				push_pred[j].bp_valid = bp_req_valid;
+				push_pred[j].bp_taken = (bp_prediction == TAKEN);
+				push_pred[j].bp_index = bp_index;
+				push_pred[j].bp_weak = bp_weak;
+				push_pred[j].bp_perc = bp_perc;
+				push_pred[j].bp_gshare = bp_gshare;
+			end
+		end
+	end
 
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 	// |||| Decode
@@ -115,6 +313,12 @@ module frontend (
 	dec_uop_t dec_raw [FE_WIDTH];
 	logic [`ADDR_WIDTH - 1 : 0] slot_pc [FE_WIDTH];
 	logic slot_present [FE_WIDTH];
+	fe_pred_t slot_pred [FE_WIDTH];
+
+	// Where fetch actually went after this instruction and its delay slot,
+	// against where decode now says it should have gone.
+	logic [`ADDR_WIDTH - 1 : 0] fetch_tgt [FE_WIDTH];
+	logic [`ADDR_WIDTH - 1 : 0] want_tgt [FE_WIDTH];
 
 	genvar g;
 	generate
@@ -122,6 +326,7 @@ module frontend (
 		begin : decoders
 			assign slot_pc[g] = fb_pc[FB_IDX_W'(fb_head + FB_IDX_W'(g))];
 			assign slot_present[g] = ({1'b0, FB_IDX_W'(g)} < fb_count);
+			assign slot_pred[g] = fb_pred[FB_IDX_W'(fb_head + FB_IDX_W'(g))];
 
 			assign dec_pc[g].pc = slot_pc[g];
 			assign dec_inst[g].valid = slot_present[g];
@@ -152,81 +357,82 @@ module frontend (
 			assign dec_raw[g].immediate      = dec_out[g].immediate;
 			assign dec_raw[g].uses_rw        = dec_out[g].uses_rw;
 			assign dec_raw[g].rw_addr        = dec_out[g].rw_addr;
-			assign dec_raw[g].prediction     = NOT_TAKEN;
-			assign dec_raw[g].recovery_target= '0;
-			assign dec_raw[g].bp_index       = '0;
-			// Every instruction records the history live at its decode so
-			// that a jr redirect can restore it too, not only a branch.
-			assign dec_raw[g].bp_hist        = bp_hist;
-			assign dec_raw[g].bp_weak        = 1'b0;
-			assign dec_raw[g].bp_perc        = NOT_TAKEN;
-			assign dec_raw[g].bp_gshare      = NOT_TAKEN;
+
+			// The prediction was made in fetch and travelled here with the
+			// instruction. A target buffer miss reads as not taken, which is
+			// what fetch did, and execute is then what corrects it.
+			assign dec_raw[g].prediction     = (slot_pred[g].bp_valid
+			                                    & slot_pred[g].bp_taken)
+			                                   ? TAKEN : NOT_TAKEN;
+			assign dec_raw[g].recovery_target= (slot_pred[g].bp_valid
+			                                    & slot_pred[g].bp_taken)
+			                                   ? (slot_pc[g] + `ADDR_WIDTH'd8)
+			                                   : dec_out[g].branch_target;
+			assign dec_raw[g].bp_valid       = slot_pred[g].bp_valid;
+			assign dec_raw[g].bp_index       = slot_pred[g].bp_index;
+			assign dec_raw[g].bp_hist        = slot_pred[g].bp_hist;
+			assign dec_raw[g].bp_weak        = slot_pred[g].bp_weak;
+			assign dec_raw[g].bp_perc        = slot_pred[g].bp_perc;
+			assign dec_raw[g].bp_gshare      = slot_pred[g].bp_gshare;
+
+			// Fetch either steered to the target buffer's answer, or ran on
+			// sequentially -- which for a control instruction means past its
+			// delay slot, to pc + 8.
+			assign fetch_tgt[g] = slot_pred[g].redir
+				? slot_pred[g].btb_target
+				: (slot_pc[g] + `ADDR_WIDTH'd8);
 		end
 	endgenerate
 
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 	// |||| Group formation
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
-	// pend_* remembers a redirect whose delay slot had not been fetched yet.
+	// pend_* remembers a decode redirect whose delay slot had not been fetched.
 	logic pend_valid;
 	logic [`ADDR_WIDTH - 1 : 0] pend_pc;
 
 	logic present [FE_WIDTH];
+	logic is_ctrl [FE_WIDTH];
 	logic is_cond [FE_WIDTH];
 	logic is_direct_jump [FE_WIDTH];
 	logic want_redirect [FE_WIDTH];
+	logic want_btb_fill [FE_WIDTH];
 
-	logic dec_redirect;
-	logic [`ADDR_WIDTH - 1 : 0] dec_redirect_pc;
 	logic set_pend;
 	logic [`ADDR_WIDTH - 1 : 0] set_pend_pc;
 	logic [2:0] accept_n;
 
-	// Only the first conditional branch in the group gets a prediction, so the
-	// single predictor port is enough.
-	logic [2:0] cond_slot;
-	logic cond_found;
-
 	always_comb
 	begin
-		cond_found = 1'b0;
-		cond_slot = '0;
 		for (int k = 0; k < FE_WIDTH; k++)
 		begin
 			// An unsupported opcode decodes to valid = 0 with nop defaults.
 			// It still has to be consumed, or the front end wedges on it.
 			present[k] = slot_present[k];
-			is_cond[k] = present[k] && dec_raw[k].is_branch_jump && !dec_raw[k].is_jump;
-			is_direct_jump[k] = present[k] && dec_raw[k].is_jump && !dec_raw[k].is_jump_reg;
-			if (is_cond[k] && !cond_found)
-			begin
-				cond_found = 1'b1;
-				cond_slot = 3'(k);
-			end
-		end
-	end
+			is_ctrl[k] = present[k] && dec_raw[k].is_branch_jump;
+			is_cond[k] = is_ctrl[k] && !dec_raw[k].is_jump;
+			is_direct_jump[k] = is_ctrl[k] && dec_raw[k].is_jump
+				&& !dec_raw[k].is_jump_reg;
 
-	assign bp_req_valid = cond_found && (accept_n > cond_slot) && !fe_stall;
+			// A direct jump always goes to its target. A conditional branch
+			// goes there when the prediction fetch made says taken. A jr is
+			// resolved in execute, so the front end runs on sequentially.
+			want_tgt[k] = (is_direct_jump[k]
+				|| (is_cond[k] && (dec_raw[k].prediction == TAKEN)))
+				? dec_raw[k].branch_target
+				: (slot_pc[k] + `ADDR_WIDTH'd8);
 
-	always_comb
-	begin
-		bp_req_pc = slot_pc[0];
-		for (int k = 0; k < FE_WIDTH; k++)
-		begin
-			if (3'(k) == cond_slot)
-				bp_req_pc = slot_pc[k];
-		end
-	end
+			// The only reason left to redirect from decode is that fetch got
+			// it wrong, which now means the target buffer missed or held a
+			// stale target.
+			want_redirect[k] = is_ctrl[k] && (fetch_tgt[k] != want_tgt[k]);
 
-	always_comb
-	begin
-		for (int k = 0; k < FE_WIDTH; k++)
-		begin
-			// A direct jump always redirects. A conditional branch redirects
-			// only when it is predicted taken. A jr redirects from execute,
-			// because its target lives in a register.
-			want_redirect[k] = is_direct_jump[k]
-				|| (is_cond[k] && (3'(k) == cond_slot) && (bp_prediction == TAKEN));
+			// Fill the target buffer for anything with a fixed target that it
+			// does not already hold correctly. This is what makes the miss
+			// above happen only once per static branch.
+			want_btb_fill[k] = is_ctrl[k] && !dec_raw[k].is_jump_reg
+				&& (!slot_pred[k].btb_hit
+					|| (slot_pred[k].btb_target != dec_raw[k].branch_target));
 		end
 	end
 
@@ -252,34 +458,54 @@ module frontend (
 					dec_redirect_pc = pend_pc;
 					stop = 1'b1;
 				end
-				else if (want_redirect[k])
-				begin
-					if ((k + 1 < FE_WIDTH) && present[k + 1])
-					begin
-						accept_n = 3'(k) + 3'd2;	// take the delay slot too
-						dec_redirect = 1'b1;
-						dec_redirect_pc = dec_raw[k].branch_target;
-					end
-					else
-					begin
-						set_pend = 1'b1;
-						set_pend_pc = dec_raw[k].branch_target;
-					end
-					stop = 1'b1;
-				end
-				else if (is_cond[k] || dec_raw[k].is_jump_reg)
+				else if (is_ctrl[k])
 				begin
 					// Cut the group after a control instruction and its delay
-					// slot so that only one prediction is needed per cycle and
-					// the delay slot is never separated from its branch by a
-					// group boundary that a squash could cut through.
+					// slot, so that only one prediction is in flight per cycle
+					// and the delay slot is never separated from its branch by
+					// a group boundary that a squash could cut through.
 					if ((k + 1 < FE_WIDTH) && present[k + 1])
 						accept_n = 3'(k) + 3'd2;
+
+					if (want_redirect[k])
+					begin
+						if (accept_n == 3'(k) + 3'd2)
+						begin
+							dec_redirect = 1'b1;
+							dec_redirect_pc = want_tgt[k];
+						end
+						else
+						begin
+							set_pend = 1'b1;
+							set_pend_pc = want_tgt[k];
+						end
+					end
 					stop = 1'b1;
 				end
 			end
 			else
 				stop = 1'b1;
+		end
+	end
+
+	// One target buffer fill per cycle, taken from the oldest control
+	// instruction in the accepted group that needs one.
+	always_comb
+	begin
+		btb_wr_valid = 1'b0;
+		btb_wr_pc = '0;
+		btb_wr_target = '0;
+		btb_wr_uncond = 1'b0;
+
+		for (int k = FE_WIDTH - 1; k >= 0; k--)
+		begin
+			if (want_btb_fill[k] && ({1'b0, 3'(k)} < {1'b0, accept_n}) && !fe_stall)
+			begin
+				btb_wr_valid = 1'b1;
+				btb_wr_pc = slot_pc[k];
+				btb_wr_target = dec_raw[k].branch_target;
+				btb_wr_uncond = dec_raw[k].is_jump;
+			end
 		end
 	end
 
@@ -293,20 +519,10 @@ module frontend (
 			fe_uop[k] = dec_raw[k];
 			fe_uop[k].valid = ({1'b0, 3'(k)} < {1'b0, accept_n}) && !ex_redirect_valid;
 
-			// Only the branch that was actually predicted carries predictor
-			// state; everything else retires without training anything.
-			if (is_cond[k] && (3'(k) == cond_slot))
-			begin
-				fe_uop[k].prediction = bp_prediction;
-				fe_uop[k].recovery_target = (bp_prediction == TAKEN)
-					? dec_raw[k].pc + `ADDR_WIDTH'd8
-					: dec_raw[k].branch_target;
-				fe_uop[k].bp_index = bp_index;
-				fe_uop[k].bp_hist = bp_hist;
-				fe_uop[k].bp_weak = bp_weak;
-				fe_uop[k].bp_perc = bp_perc;
-				fe_uop[k].bp_gshare = bp_gshare;
-			end
+			// Only a conditional branch carries predictor state; nothing else
+			// trains anything, whatever it happened to be fetched alongside.
+			if (!is_cond[k])
+				fe_uop[k].bp_valid = 1'b0;
 		end
 	end
 
@@ -325,6 +541,7 @@ module frontend (
 			fb_tail <= '0;
 			fb_count <= '0;
 			pend_valid <= 1'b0;
+			pend_fe_valid <= 1'b0;
 		end
 		else
 		begin
@@ -337,6 +554,7 @@ module frontend (
 					fb_pc[FB_IDX_W'(fb_tail + FB_IDX_W'(j))]
 						<= pc_reg + `ADDR_WIDTH'(j << 2);
 					fb_inst[FB_IDX_W'(fb_tail + FB_IDX_W'(j))] <= i_inst_data[j];
+					fb_pred[FB_IDX_W'(fb_tail + FB_IDX_W'(j))] <= push_pred[j];
 				end
 			end
 
@@ -354,6 +572,18 @@ module frontend (
 				fb_count <= fb_count - {1'b0, pop_n} + {1'b0, push_n};
 			end
 
+			// ---- fetch side delay slot pending ----
+			if (fb_flush)
+				pend_fe_valid <= 1'b0;
+			else if (set_pend_fe)
+			begin
+				pend_fe_valid <= 1'b1;
+				pend_fe_pc <= hit_target;
+			end
+			else if (pend_fe_valid && (push_n != 0))
+				pend_fe_valid <= 1'b0;
+
+			// ---- decode side delay slot pending ----
 			if (ex_redirect_valid)
 				pend_valid <= 1'b0;
 			else if (!fe_stall)
@@ -376,6 +606,7 @@ module frontend (
 		begin
 			if (!i_inst_valid) stats_event("ic_miss_cycle");
 			if (fb_count == 0) stats_event("fetch_starved");
+			if (dec_redirect_go) stats_event("btb_redirect");
 		end
 	end
 `endif

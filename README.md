@@ -34,9 +34,9 @@ out-of-order core instead.
 ```
         in order                          out of order                      in order
  ┌───────────────────────┐   ┌────────────────────────────────────┐   ┌──────────────┐
- │ FETCH → fetch buffer  │   │            issue queue             │   │              │
+ │ FETCH + PREDICT (BTB) │   │            issue queue             │   │              │
  │   ↓                   │──▶│         (32 entries, oldest-       │──▶│   COMMIT     │
- │ DECODE + PREDICT      │   │          ready-first select)       │   │  (in order,  │
+ │ fetch buffer → DECODE │   │          ready-first select)       │   │  (in order,  │
  │   ↓                   │   │                 ↓                  │   │   2 wide)    │
  │ RENAME + DISPATCH     │   │   2 ALUs   +   load/store queue     │   │              │
  └───────────────────────┘   │                 ↓                  │   └──────────────┘
@@ -56,7 +56,8 @@ instruction can therefore never be observed.
 
 | File | Role |
 | --- | --- |
-| `ooo/frontend.sv` | Fetch, fetch buffer, decode, prediction, delay-slot-aware redirect control |
+| `ooo/frontend.sv` | Fetch, prediction, fetch buffer, decode, delay-slot-aware redirect control |
+| `ooo/btb.sv` | Branch target buffer: what makes prediction in fetch possible |
 | `ooo/rename_rob.sv` | Register map, free list, busy table, reorder buffer, commit, recovery |
 | `ooo/issue_queue.sv` | The instruction window: wakeup and oldest-first select |
 | `ooo/lsq.sv` | Load/store queue, disambiguation, store-to-load forwarding, D-cache port |
@@ -91,6 +92,46 @@ the prediction rather than whatever happens to be current.
 The global history register is speculative: it advances at predict time so that closely spaced
 branches see each other, and is rewound on a misprediction from the history the offending branch
 carried.
+
+### Predicting in fetch, not decode
+
+Direction is only half the problem. Knowing that a branch *will* be taken is worth nothing if you
+find out a cycle after you already fetched the instructions behind it.
+
+The first version of this design predicted in **decode**. A taken branch was recognised one cycle
+too late, the sequential instructions behind it were already in the fetch buffer, and taking the
+redirect flushed the buffer. Fetch supplies at most two words per cycle and rename consumes at most
+two, so there was no slack to absorb the refill: the buffer ran dry. On a loop-dominated program
+this costs very nearly **one lost cycle per taken branch**, and it was by a wide margin the largest
+remaining inefficiency in the machine — 21% of coin's cycles.
+
+A **branch target buffer** moves the decision into fetch. It is a 512-entry tagged table mapping a
+pc to the target of the control instruction living there, probed with the address being fetched in
+parallel with the instruction cache access for that same address. It answers the two questions
+fetch needs — *is this a branch* and *where does it go* — from the pc alone, so the next fetch
+address is already the target and **nothing on the wrong path is ever fetched**. There is nothing
+to flush, and the fetch buffer keeps its contents straight across a taken branch.
+
+Three details make it work:
+
+- **It is filled from decode**, which is the first place the answers are actually known. A static
+  branch misses once, is filled, and hits from then on. Direct branch and jump targets are a fixed
+  function of the pc, so an entry never goes stale and a filled entry is always right. The tag is
+  every pc bit above the index, so a hit is exact.
+- **Decode still checks fetch's work.** Each fetch buffer entry records where fetch went after it;
+  decode computes where it should have gone and redirects only when the two differ. That single
+  comparison covers a target buffer miss, a stale target, and a cold branch uniformly.
+- **`jr`/`jalr` never allocate.** Their target lives in a register and changes between executions,
+  so a target buffer entry would be a guess fetch has no way to check. They keep taking their
+  redirect from execute.
+
+Delay slots need handling in both places now. If a predicted branch's delay slot did not come back
+from the cache in the same cycle as its branch, the target is held in a pending register and fetch
+spends one more cycle going sequentially to pick the delay slot up before redirecting.
+
+The measured effect on coin, where this was diagnosed: fetch-starved cycles fell from **7,224,093
+to 148,004** (a 98% reduction) and the entire 35.8 M instruction run raised exactly **one** decode
+redirect. Cycles fell 34,162,087 → 28,492,663, **1.20×**.
 
 Two indexing details are worth calling out, because getting them backwards costs a lot of accuracy:
 
@@ -164,6 +205,14 @@ rules:
 - A load matching an older store in the queue takes its value straight from the queue
   (**store-to-load forwarding**); the youngest matching older store wins.
 
+The D-cache port is **pipelined**. The cache addresses its SRAM from `addr_next` and compares tags
+against `addr`, which are a cycle apart, so an access can be set up in the same cycle the previous
+one completes — the cache has always been able to accept an address every cycle. The original queue
+walked every access through `M_IDLE → M_LOAD → M_IDLE`, which meant even a **hit** occupied the port
+for two cycles and capped memory throughput at 0.5 accesses per cycle. Replacing that state machine
+with a one-deep pipeline register removes the idle cycle and doubles the ceiling. A stalled access
+holds its own address on `addr_next` so the SRAM read is set up again for when the refill finishes.
+
 `jr`/`jalr` targets come out of a register, so they are resolved at execute and redirect through the
 same recovery path as a mispredicted branch. Direct `j`/`jal` are resolved by the front end.
 
@@ -207,15 +256,28 @@ run to completion with all three streams matching.**
 Cycle counts, lower is better. Instruction counts match the baseline exactly on every benchmark,
 so cycles and CPI carry all the information.
 
-| benchmark | baseline (in-order) | out-of-order core | **final** | speedup | IPC |
-| --- | --- | --- | --- | --- | --- |
-| nqueens   | 1,722,402  | 1,609,896  | **890,370**    | **1.93×** | 1.14 |
-| quickSort | 9,572,553  | 7,740,489  | **5,492,808**  | **1.74×** | 0.75 |
-| esift2    | 21,375,975 | 17,254,324 | **5,814,714**  | **3.68×** | 1.35 |
-| coin      | 35,944,392 | —          | **34,162,087** | **1.05×** | 1.05 |
+| benchmark | baseline (in-order) | out-of-order core | + caches | **final** | speedup | IPC |
+| --- | --- | --- | --- | --- | --- | --- |
+| nqueens   | 1,722,402  | 1,609,896  | 890,370    | **807,339**    | **2.13×** | 1.26 |
+| quickSort | 9,572,553  | 7,740,489  | 5,492,808  | **5,240,726**  | **1.83×** | 0.78 |
+| esift2    | 21,375,975 | 17,254,324 | 5,814,714  | **4,834,600**  | **4.42×** | 1.62 |
+| coin      | 35,944,392 | —          | 34,162,087 | **27,294,090** | **1.32×** | 1.31 |
 
-Geometric mean **1.90×**. The middle column is the out-of-order core at the original 2 KB caches;
-the final column adds 8 KB instruction cache and a 4-way 16 KB data cache.
+Geometric mean **2.18×**. The columns are cumulative: the out-of-order core at the original 2 KB
+caches, then 8 KB instruction cache and 4-way 16 KB data cache, then prediction moved into fetch
+with a branch target buffer and the D-cache port pipelined.
+
+The last column is worth isolating, because it is the only change that helped every benchmark:
+
+| benchmark | before front end work | + BTB in fetch | + pipelined D-cache port | total |
+| --- | --- | --- | --- | --- |
+| nqueens   | 890,370    | 860,124    | **807,349**    | **1.10×** |
+| quickSort | 5,492,808  | 5,273,026  | **5,239,953**  | **1.05×** |
+| esift2    | 5,814,714  | 4,834,598  | **4,834,598**  | **1.20×** |
+| coin      | 34,162,087 | 28,492,663 | **27,294,122** | **1.25×** |
+
+esift2 gains nothing at all from the pipelined port — to the cycle — and coin gains 1.04×. The two
+changes are almost disjoint in what they fix, which is why both were worth doing.
 
 ### Where the time goes
 
@@ -267,17 +329,41 @@ set is exact LRU for two ways and meaningless for four, so it is now a per-set r
 Nothing measurable, on either side of the machine. This is the clearest negative result here and
 worth stating plainly.
 
-| prefetcher | benchmark | with | without | difference |
-| --- | --- | --- | --- | --- |
-| D-cache stride | quickSort | 5,492,808 | 5,496,366 | 0.065% |
-| | esift2 | 5,814,714 | 5,814,715 | 1 cycle |
+| prefetcher | benchmark | D-cache | with | without | difference |
+| --- | --- | --- | --- | --- | --- |
+| D-cache stride | quickSort | 16 KB | 5,492,808 | 5,496,366 | 0.065% |
+| | esift2 | 16 KB | 5,814,714 | 5,814,715 | 1 cycle |
+| | nqueens | 8 KB | 890,370 | 890,282 | **-0.010%** |
+| | quickSort | 8 KB | 6,259,582 | 6,265,445 | 0.094% |
+| | esift2 | 8 KB | 14,533,079 | 14,533,324 | 0.002% |
 
-The instruction-side stream buffer records 162 hits on nqueens against 16,641 misses.
+The 8 KB rows were run specifically to test the obvious hypothesis — that a prefetcher earns its
+keep once the cache is under real capacity pressure — and it does not hold. At half the capacity,
+with esift2 taking **114× more D-cache misses**, the prefetcher still recovers 0.002% of its
+cycles. On nqueens it is very slightly *negative*. Across the whole of coin it issues 13
+prefetches.
 
-Both are correctly implemented and both pipeline their requests, and neither earns its area,
-because these benchmarks miss on capacity and conflicts rather than on predictable address
-streams. Once the caches were sized properly there was almost nothing left to predict. The D-cache
-prefetcher can be compiled out with `ENABLE_PREFETCH = 0`.
+Shrinking the cache to pay for the prefetcher is a losing trade in both directions:
+
+| benchmark | 4-way 16 KB | 4-way 8 KB | cost of halving |
+| --- | --- | --- | --- |
+| nqueens   | 890,370   | 890,370    | none — working set fits either way |
+| quickSort | 5,492,808 | 6,259,582  | **1.14×** |
+| esift2    | 5,814,714 | 14,533,079 | **2.50×** |
+
+esift2's working set sits between the two sizes, and crossing that cliff costs 8.7 M cycles —
+roughly 35,000 times what the prefetcher recovers there.
+
+The instruction-side stream buffer tells the same story: 162 hits on nqueens against 16,641
+misses. Next-line prefetching is the wrong model for these programs. The instruction misses were
+capacity misses on a loop working set, not a sequential stream, and enlarging the cache addressed
+them completely.
+
+Both prefetchers are correctly implemented and both pipeline their requests, and neither earns its
+area, because these benchmarks miss on capacity and conflicts rather than on predictable address
+streams. Once the caches were sized properly there was almost nothing left to predict.
+**`ENABLE_PREFETCH` therefore defaults to 0**; the logic stays in the tree so the ablation above
+reproduces.
 
 ### Branch prediction accuracy
 
@@ -290,15 +376,6 @@ prefetcher can be compiled out with `ENABLE_PREFETCH = 0`.
 The chooser is close to a wash: it wins slightly on quickSort and loses slightly on nqueens, where
 the perceptron on its own would have been better. gshare is the weaker component throughout.
 
-### What the prefetcher is worth
-
-Honestly, almost nothing on these benchmarks. With the I-cache correctly sized, the stream buffer
-records 162 hits on nqueens against 16,636 misses. Next-line prefetching is the wrong model here —
-the instruction misses were capacity misses on a loop working set, not a sequential stream, and
-enlarging the cache addressed them completely. The implementation is correct and its requests are
-pipelined, but it does not earn its area as built. The misses that remain are on the **data** side,
-which is where a stride prefetcher would belong.
-
 All four benchmarks are checkable. If `coin.ls.txt.bz2` ever fails to decompress, the archive in
 git is intact (md5 `ddb5e9b2a81ebcb95dee219cfebedb1b`) and the working-tree copy has gone bad —
 `rm hexfiles/coin.ls.txt.bz2 && git checkout -- hexfiles/coin.ls.txt.bz2` restores it. Note that
@@ -309,47 +386,63 @@ correspondingly longer to simulate.
 
 ### Where the remaining time goes
 
-With the caches fixed the bottleneck moved, and it is now different on each benchmark:
+With the caches fixed and the front end fixed, the bottleneck moved again, and it is now different
+on each benchmark:
 
 | benchmark | IPC (ceiling 2.0) | D-cache miss | I-cache miss | limited by |
 | --- | --- | --- | --- | --- |
-| esift2 | 1.35 | 1.5% | 0.04% | the core |
-| nqueens | 1.14 | 1.2% | 1.9% | front end and branches |
-| coin | 1.05 | 0.01% | 0.009% | the core |
-| quickSort | 0.75 | 45% | 0.09% | memory |
+| esift2    | 1.62 | 1.5%  | 0.04%  | the core |
+| coin      | 1.31 | 0.01% | 0.009% | the core |
+| nqueens   | 1.26 | 1.2%  | 1.9%   | branch accuracy |
+| quickSort | 0.78 | 45%   | 0.09%  | memory |
 
-coin is the most useful diagnostic in the suite: it has essentially no cache misses at all and
-still only reaches IPC 1.05, so it measures what the core alone is leaving on the table. Note the
-in-order baseline runs coin at IPC 0.995, i.e. at 99.5% of *its* ceiling, which is why the
-out-of-order machine only gains 1.05× there.
+#### How the front-end problem was found, and what fixing it did
 
-coin makes the front end's cost visible, because nothing else is in the way. It records
-**7,224,093 fetch-starved cycles** -- 21% of its run with the fetch buffer empty -- against an
-instruction cache miss rate of 0.009%. The cache is not the cause. It also retires 7,181,552
-conditional branches, so there is very nearly **one starved cycle per branch**.
+coin is the most useful diagnostic in the suite: it has essentially no cache misses at all, so it
+measures what the core alone is leaving on the table. Before this round of work it recorded
+**7,224,093 fetch-starved cycles** — 21% of its run with the fetch buffer empty — against an
+instruction cache miss rate of 0.009%. The cache was not the cause. It also retires 7,181,552
+conditional branches, so there was very nearly **one starved cycle per branch**:
 
-That ratio points straight at where prediction happens. A branch is predicted in *decode*, so a
-redirect is discovered a cycle after those instructions were fetched, and taking it flushes the
-fetch buffer. Fetch supplies at most two words per cycle and rename consumes at most two, so there
-is no slack to absorb the refill and the buffer runs dry for a cycle. coin is loop-dominated, so
-nearly every branch is taken and nearly every branch costs that cycle.
+```
+fetch_starved 7,224,093 / conditional branches 7,181,552 = 1.006
+```
 
-Moving prediction into fetch with a branch target buffer removes the flush entirely: the program
-counter is redirected in the cycle the branch is fetched, so no wrong-path instruction ever enters
-the buffer. On coin that is worth up to 7 M of 34 M cycles.
+That ratio pointed straight at where prediction happened. Predicting in decode meant a redirect was
+discovered a cycle after those instructions were fetched, and taking it flushed the fetch buffer.
+Two other candidates were ruled out by the same run: branch *accuracy* was already 98.0%, and
+`rename_stall` was only 7.9%, so neither the predictor nor the reorder buffer was the constraint.
 
-Branch *accuracy* is not the problem on coin -- the tournament predictor gets 98.0% there. Nor is
-the reorder buffer: `rename_stall` is 7.9%.
+The [branch target buffer](#predicting-in-fetch-not-decode) removed it:
 
-A second, smaller limit is the load/store queue, which walks every access through
-`M_IDLE -> M_LOAD -> M_IDLE` because the D-cache SRAM must be addressed via `addr_next` a cycle
-before `addr`. Even a **hit** therefore occupies the memory port for two cycles, capping throughput
-at 0.5 accesses per cycle. coin runs at 0.326, i.e. 65% of that cap. The D-cache is a one-cycle-hit
-design and could accept an address every cycle; the round trip through idle is an artifact of the
-queue.
+| coin | before | after BTB | after pipelined port |
+| --- | --- | --- | --- |
+| cycles | 34,162,087 | 28,492,663 | **27,294,122** |
+| fetch_starved | 7,224,093 | 148,004 | 148,004 |
+| decode redirects | ~7.1 M | **1** | **1** |
+| cycles issuing nothing | 12,712,810 | 6,915,565 | 6,184,585 |
+| rename_stall | 2,687,230 | 4,536,081 | 3,225,107 |
+| IPC | 1.047 | 1.255 | **1.310** |
 
-For reference, the in-order baseline runs coin at IPC 0.995 -- 99.5% of *its* ceiling -- which is
-why the out-of-order machine only gains 1.05x there. coin is the benchmark this design serves worst.
+One decode redirect in a 35.8 M instruction run: after the first execution of each static branch,
+the target buffer answers every one of them. `rename_stall` rising after the BTB is the bottleneck
+moving downstream — the front end started delivering faster than the back end was draining, which
+is exactly what the pipelined D-cache port then relieved.
+
+#### What is left
+
+- **quickSort is memory bound and stays that way.** 45% of its accesses miss, both caches block, and
+  the load/store queue services one miss at a time. Miss-status holding registers, so that
+  independent misses overlap instead of serialising, are the only thing that would move it.
+- **nqueens is limited by branch accuracy**, at 76.3%. It is the one benchmark where a stronger
+  direction predictor (TAGE) would pay; on coin and esift2 the tournament predictor is already at
+  98% and there is nothing to win.
+- **esift2 and coin are core limited** at IPC 1.62 and 1.31 against a ceiling of 2.0. What is left
+  there is issue width and dependence chains, not any single structure.
+
+For reference, the in-order baseline runs coin at IPC 0.995 — 99.5% of *its* ceiling. coin was the
+benchmark this design served worst, at 1.05×; it is now 1.32×, and the gap that closed was entirely
+front end.
 
 # Simulation
 

@@ -94,18 +94,32 @@ module lsq (
 	lsq_idx_t lsq_head, lsq_tail;
 	logic [LSQ_IDX_W : 0] lsq_count;
 
-	enum logic [1:0] {
-		M_IDLE,
-		M_LOAD,
-		M_STORE
-	} state, next_state;
+	// The access presented to the D cache this cycle. This is a one deep
+	// pipeline register rather than a state machine: the cache addresses its
+	// SRAM from addr_next and compares tags against addr, which are a cycle
+	// apart, so an access can be set up in the same cycle that the previous one
+	// completes. An idle-per-access state machine cannot do that and caps the
+	// port at one access every two cycles, which on a load heavy program is the
+	// binding limit long before the cache itself is.
+	logic acc_valid;
+	logic acc_is_store;
+	logic [`ADDR_WIDTH - 1 : 0] acc_addr;
+	logic [`DATA_WIDTH - 1 : 0] acc_data;	// store data
+	rob_idx_t acc_rob;						// load identity
+	preg_t acc_pd;
+	logic acc_writes;
+	logic acc_killed;
 
-	// The load currently being fetched from the cache.
-	rob_idx_t ld_rob;
-	preg_t ld_pd;
-	logic ld_writes;
-	logic [`ADDR_WIDTH - 1 : 0] ld_addr;
-	logic ld_killed;
+	// The access to present next cycle, and whose address goes out on
+	// addr_next now.
+	logic nxt_valid;
+	logic nxt_is_store;
+	logic [`ADDR_WIDTH - 1 : 0] nxt_addr;
+	logic [`DATA_WIDTH - 1 : 0] nxt_data;
+	rob_idx_t nxt_rob;
+	preg_t nxt_pd;
+	logic nxt_writes;
+	logic nxt_killed;
 
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 	// |||| Disambiguation
@@ -171,77 +185,95 @@ module lsq (
 	// A commit store has priority; loads use the port when it is free.
 	logic start_load;
 	logic start_store;
+	logic acc_abandon;		// a squashed load, whose answer nobody wants
+	logic acc_done;
+	logic port_free;
+
+	assign acc_abandon = acc_valid && !acc_is_store && acc_killed;
+	assign acc_done = acc_valid && (dc_out.valid || acc_abandon);
+	// The port can take a new access whenever it is empty or the access on it
+	// finishes this cycle. That last case is what makes it a pipeline: the
+	// finishing access is still being compared against addr while the next one
+	// is already addressing the SRAM through addr_next.
+	assign port_free = !acc_valid || acc_done;
 
 	assign start_load = mem_issue && (mem_uop.mem_action == READ) && !fwd_hit
-		&& (state == M_IDLE);
-	assign start_store = st_valid && (state == M_IDLE) && !start_load;
+		&& port_free;
+	// A store that is already on the port must not be launched a second time;
+	// st_valid stays asserted until st_done answers it.
+	assign start_store = st_valid && port_free && !start_load
+		&& !(acc_valid && acc_is_store);
 
-	assign o_accept = (state == M_IDLE) || (state == M_LOAD && dc_out.valid)
-		|| (state == M_STORE && dc_out.valid);
+	// A memory operation may issue whenever the port could take it. Holding
+	// issue back to this also keeps at most one load completing per cycle,
+	// which is what lets the forwarding path and the cache path share a single
+	// writeback port.
+	assign o_accept = port_free;
 	// A load can only be set up when nothing else is claiming the port, since
 	// the cache SRAM has to be addressed a cycle in advance.
-	assign o_load_free = (state == M_IDLE) && !st_valid;
+	assign o_load_free = port_free && !st_valid;
+
+	always_comb
+	begin
+		nxt_valid = 1'b0;
+		nxt_is_store = 1'b0;
+		nxt_addr = '0;
+		nxt_data = '0;
+		nxt_rob = '0;
+		nxt_pd = '0;
+		nxt_writes = 1'b0;
+		nxt_killed = 1'b0;
+
+		if (acc_valid && !acc_done)
+		begin
+			// Still waiting on the cache: hold everything, including addr_next,
+			// so the SRAM read is set up again for when the refill finishes.
+			nxt_valid = 1'b1;
+			nxt_is_store = acc_is_store;
+			nxt_addr = acc_addr;
+			nxt_data = acc_data;
+			nxt_rob = acc_rob;
+			nxt_pd = acc_pd;
+			nxt_writes = acc_writes;
+			nxt_killed = acc_killed
+				|| (squash && !acc_is_store
+					&& ({1'b0, rob_idx_t'(acc_rob - squash_head)} >= squash_count));
+		end
+		else if (start_load)
+		begin
+			nxt_valid = 1'b1;
+			nxt_addr = mem_addr;
+			nxt_rob = mem_uop.rob_idx;
+			nxt_pd = mem_uop.pd;
+			nxt_writes = mem_uop.uses_rw;
+		end
+		else if (start_store)
+		begin
+			nxt_valid = 1'b1;
+			nxt_is_store = 1'b1;
+			nxt_addr = st_addr;
+			nxt_data = st_data;
+		end
+	end
+
 	// The D-cache prefetcher borrows the tag array while nothing else needs it.
 	// It may only do so when no access is being set up, because a request is
 	// presented to the cache one cycle after its address appears on addr_next.
-	assign o_pf_allow = (state == M_IDLE) && !st_valid && !start_load && !mem_issue;
+	assign o_pf_allow = !nxt_valid && !mem_issue && !st_valid;
 
 	always_comb
 	begin
-		dc_in.valid = 1'b0;
-		dc_in.mem_action = READ;
-		dc_in.addr = '0;
-		dc_in.data = '0;
-		dc_in.addr_next = '0;
-
-		case (state)
-			M_LOAD:
-			begin
-				dc_in.valid = ~ld_killed;
-				dc_in.mem_action = READ;
-				dc_in.addr = ld_addr;
-				dc_in.addr_next = ld_addr;
-			end
-
-			M_STORE:
-			begin
-				dc_in.valid = 1'b1;
-				dc_in.mem_action = WRITE;
-				dc_in.addr = st_addr;
-				dc_in.data = st_data;
-				dc_in.addr_next = st_addr;
-			end
-
-			default:
-			begin
-				// Set up the SRAM read for whatever starts next cycle.
-				if (start_load)
-					dc_in.addr_next = mem_addr;
-				else if (st_valid)
-					dc_in.addr_next = st_addr;
-			end
-		endcase
+		dc_in.valid = acc_valid && !acc_abandon;
+		dc_in.mem_action = acc_is_store ? WRITE : READ;
+		dc_in.addr = acc_addr;
+		dc_in.data = acc_data;
+		// The address the cache should read its SRAM at for next cycle. When
+		// nothing follows, leave the current address there rather than zero, so
+		// a stalled access keeps its own row selected.
+		dc_in.addr_next = nxt_valid ? nxt_addr : acc_addr;
 	end
 
-	assign st_done = (state == M_STORE) && dc_out.valid;
-
-	always_comb
-	begin
-		next_state = state;
-		case (state)
-			M_IDLE:
-				if (start_load)
-					next_state = M_LOAD;
-				else if (st_valid)
-					next_state = M_STORE;
-			M_LOAD:
-				if (dc_out.valid || ld_killed)
-					next_state = M_IDLE;
-			M_STORE:
-				if (dc_out.valid)
-					next_state = M_IDLE;
-		endcase
-	end
+	assign st_done = acc_valid && acc_is_store && dc_out.valid;
 
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 	// |||| Load writeback
@@ -263,7 +295,7 @@ module lsq (
 	assign fwd_squashed = squash
 		&& ({1'b0, rob_idx_t'(fwd_rob - squash_head)} >= squash_count);
 	assign ld_squashed = squash
-		&& ({1'b0, rob_idx_t'(ld_rob - squash_head)} >= squash_count);
+		&& ({1'b0, rob_idx_t'(acc_rob - squash_head)} >= squash_count);
 
 	always_comb
 	begin
@@ -278,13 +310,13 @@ module lsq (
 		end
 		else
 		begin
-			ld_wb_valid = (state == M_LOAD) && dc_out.valid && !ld_killed
-				&& !ld_squashed;
-			ld_wb_rob_idx = ld_rob;
-			ld_wb_pd = ld_pd;
-			ld_wb_writes = ld_writes;
+			ld_wb_valid = acc_valid && !acc_is_store && dc_out.valid
+				&& !acc_killed && !ld_squashed;
+			ld_wb_rob_idx = acc_rob;
+			ld_wb_pd = acc_pd;
+			ld_wb_writes = acc_writes;
 			ld_wb_data = dc_out.data;
-			ld_wb_addr = ld_addr;
+			ld_wb_addr = acc_addr;
 		end
 	end
 
@@ -323,13 +355,22 @@ module lsq (
 			lsq_head <= '0;
 			lsq_tail <= '0;
 			lsq_count <= '0;
-			state <= M_IDLE;
+			acc_valid <= 1'b0;
+			acc_is_store <= 1'b0;
+			acc_killed <= 1'b0;
 			fwd_pending <= 1'b0;
-			ld_killed <= 1'b0;
 		end
 		else
 		begin
-			state <= next_state;
+			// The D cache port, advanced by one access.
+			acc_valid <= nxt_valid;
+			acc_is_store <= nxt_is_store;
+			acc_addr <= nxt_addr;
+			acc_data <= nxt_data;
+			acc_rob <= nxt_rob;
+			acc_pd <= nxt_pd;
+			acc_writes <= nxt_writes;
+			acc_killed <= nxt_killed;
 			// Driven from exactly one place, so that the squash handling below
 			// cannot silently override a forward being set this cycle.
 			fwd_pending <= mem_issue && (mem_uop.mem_action == READ) && fwd_hit;
@@ -342,27 +383,19 @@ module lsq (
 				if (mem_uop.mem_action == WRITE)
 					e[mem_uop.lsq_idx].data <= mem_data;
 
-				if (mem_uop.mem_action == READ)
+				// A load that misses the forwarding path is picked up by the
+				// port logic above, which owns acc_* outright so that a squash
+				// arriving on the same edge cannot race it.
+				if ((mem_uop.mem_action == READ) && fwd_hit)
 				begin
-					if (fwd_hit)
-					begin
-						fwd_rob <= mem_uop.rob_idx;
-						fwd_pd <= mem_uop.pd;
-						fwd_writes <= mem_uop.uses_rw;
-						fwd_val <= fwd_data;
-						fwd_addr <= mem_addr;
-					`ifdef SIMULATION
-						stats_event("store_forward");
-					`endif
-					end
-					else
-					begin
-						ld_rob <= mem_uop.rob_idx;
-						ld_pd <= mem_uop.pd;
-						ld_writes <= mem_uop.uses_rw;
-						ld_addr <= mem_addr;
-						ld_killed <= 1'b0;
-					end
+					fwd_rob <= mem_uop.rob_idx;
+					fwd_pd <= mem_uop.pd;
+					fwd_writes <= mem_uop.uses_rw;
+					fwd_val <= fwd_data;
+					fwd_addr <= mem_addr;
+				`ifdef SIMULATION
+					stats_event("store_forward");
+				`endif
 				end
 			end
 
@@ -413,10 +446,9 @@ module lsq (
 				end
 
 				// A load already talking to the cache may now be wrong path.
-				// Let the access finish but throw the answer away.
-				if ((state == M_LOAD)
-					&& ({1'b0, rob_idx_t'(ld_rob - squash_head)} >= squash_count))
-					ld_killed <= 1'b1;
+				// That is handled where acc_* is computed, which carries the
+				// kill into nxt_killed rather than writing acc_killed from two
+				// places on the same edge.
 
 				lsq_count <= survivors - dealloc_n;
 				lsq_tail <= lsq_idx_t'(lsq_head + dealloc_n[LSQ_IDX_W - 1 : 0]

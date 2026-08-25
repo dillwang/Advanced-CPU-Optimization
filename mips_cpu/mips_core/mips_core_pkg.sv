@@ -113,6 +113,15 @@ parameter int BP_HISTORY   = 16;
 parameter int BP_TABLES    = 1024;
 parameter int BP_IDX_W     = 10;	// $clog2(BP_TABLES)
 
+// Branch target buffer geometry. The BTB is what lets a prediction be made in
+// fetch: it answers "is the instruction at this pc a branch, and where does it
+// go" before the instruction itself has been decoded.
+parameter int BTB_ENTRIES  = 512;
+parameter int BTB_IDX_W    = 9;		// $clog2(BTB_ENTRIES)
+// The tag is every pc bit above the index, so a hit is exact: it can only
+// mean that this same pc was decoded as a direct branch or jump before.
+parameter int BTB_TAG_W    = 26 - BTB_IDX_W - 2;	// ADDR_WIDTH - index - 2
+
 typedef logic [PRF_IDX_W - 1 : 0] preg_t;
 typedef logic [ROB_IDX_W - 1 : 0] rob_idx_t;
 typedef logic [LSQ_IDX_W - 1 : 0] lsq_idx_t;
@@ -157,6 +166,9 @@ typedef struct packed {
 	// state it predicted from, instead of whatever happens to be current.
 	BranchOutcome prediction;
 	logic [25:0] recovery_target;
+	// Clear when the branch target buffer missed, so fetch never looked the
+	// branch up and there is no predictor state to train or history to rewind.
+	logic bp_valid;
 	logic [BP_IDX_W - 1 : 0] bp_index;
 	logic [BP_HISTORY - 1 : 0] bp_hist;
 	logic bp_weak;
@@ -191,6 +203,7 @@ typedef struct packed {
 	BranchOutcome prediction;
 	logic [25:0] recovery_target;	// where to go if the guess was wrong
 	logic [25:0] seq_target;		// pc + 8, the address after the delay slot
+	logic bp_valid;					// predictor state below is real
 	logic [BP_IDX_W - 1 : 0] bp_index;
 	logic [BP_HISTORY - 1 : 0] bp_hist;
 	logic bp_weak;
