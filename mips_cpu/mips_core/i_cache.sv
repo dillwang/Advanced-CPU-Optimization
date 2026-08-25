@@ -26,7 +26,7 @@
 `include "mips_core.svh"
 
 module i_cache #(
-    parameter INDEX_WIDTH = 6, // 1 KB Cahe size
+    parameter INDEX_WIDTH = 8, // 8 KB cache size (2 ways x 256 sets x 4 words)
     parameter BLOCK_OFFSET_WIDTH = 2,
     parameter ASSOCIATIVITY = 2
     )(
@@ -39,7 +39,7 @@ module i_cache #(
     pc_ifc.in i_pc_next,
 
     // Response
-    cache_output_ifc.out out,
+    fetch_output_ifc.out out,
 
     // Memory interface
     axi_read_address.master mem_read_address,
@@ -234,7 +234,14 @@ module i_cache #(
     always_comb
     begin
         out.valid = hit;
-        out.data = databank_rdata[select_way][i_block_offset];
+        for (int j = 0; j < FE_WIDTH; j++)
+        begin
+            automatic int off = int'(i_block_offset) + j;
+            // Words past the end of the line belong to a different line and
+            // would need a second lookup, so they are simply not offered.
+            out.word_valid[j] = hit && (off < LINE_SIZE);
+            out.data[j] = databank_rdata[select_way][off % LINE_SIZE];
+        end
     end
 
     always_comb

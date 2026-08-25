@@ -25,20 +25,13 @@ module reg_file (
 	input clk,    // Clock
 
 	// Input from decoder
-	//decoder_output_ifc.in i_decoded,
-
-	//input from reg rename
-	reg_ren_ifc.in i_reg_ren,
-	reg_ren_ifc.out o_reg_ren,
+	decoder_output_ifc.in i_decoded,
 
 	// Input from write back stage
 	write_back_ifc.in i_wb,
 
 	// Output data
-	reg_file_output_ifc.out out,
-
-	output logic commit_rw
-
+	reg_file_output_ifc.out out
 );
 
 
@@ -48,23 +41,13 @@ module reg_file (
 
 	logic [`DATA_WIDTH - 1 : 0] regs [64];
 
-	assign out.rs_data = i_reg_ren.next_instr.uses_rs ? regs[i_reg_ren.next_instr.rs_phys] : '0;
-	assign out.rt_data = i_reg_ren.next_instr.uses_rt ? regs[i_reg_ren.next_instr.rt_phys] : '0;
+	assign out.rs_data = i_decoded.uses_rs ? regs[i_decoded.rs_addr] : '0;
+	assign out.rt_data = i_decoded.uses_rt ? regs[i_decoded.rt_addr] : '0;
 
 	always_ff @(posedge clk) begin
 		if(i_wb.uses_rw)
 		begin
 			regs[i_wb.rw_addr] = i_wb.rw_data;
-			commit_rw <= 1;
-		end
-		else begin
-			commit_rw <= 0;
-		end
-	end
-
-	always_comb begin
-		if(i_wb.uses_rw) begin
-			o_reg_ren.busy_bits[i_wb.rw_addr] = 0;
 		end
 	end
 

@@ -39,7 +39,7 @@ interface d_cache_input_ifc ();
 endinterface
 
 module d_cache #(
-    parameter INDEX_WIDTH = 6,  // 2 * 1 KB Cache Size
+    parameter INDEX_WIDTH = 8,  // 2 * 4 KB Cache Size
     parameter BLOCK_OFFSET_WIDTH = 2,
     parameter ASSOCIATIVITY = 2
     )(

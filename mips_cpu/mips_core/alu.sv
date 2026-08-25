@@ -67,27 +67,14 @@ module alu (
 				ALUCTL_SRAV: out.result = in.op2 >>> in.op1[4:0];
 				ALUCTL_NOR:  out.result = ~(in.op1 | in.op2);
 
-				ALUCTL_MTC0_PASS:   // MTC0 -- redefined for our purposes.
-				begin
-				`ifdef SIMULATION
-					$display("%m (%t) PASS test %x", $time, in.op2);
-				`endif
-				end
-
-				ALUCTL_MTC0_FAIL:
-				begin
-				`ifdef SIMULATION
-					$display("%m (%t) FAIL test %x", $time, in.op2);
-				`endif
-				end
-
-				ALUCTL_MTC0_DONE:
-				begin
-					done = 1'b1;
-				`ifdef SIMULATION
-					$display("%m (%t) DONE test %x", $time, in.op2);
-				`endif
-				end
+				// MTC0 -- redefined for our purposes. The test number is
+				// passed through as the result so that commit, which is the
+				// only place that knows an instruction is on the correct
+				// path, can report it. Reporting from here would print tests
+				// that the machine later squashes.
+				ALUCTL_MTC0_PASS: out.result = in.op2;
+				ALUCTL_MTC0_FAIL: out.result = in.op2;
+				ALUCTL_MTC0_DONE: out.result = in.op2;
 
 				ALUCTL_BA:   out.branch_outcome = TAKEN;
 				ALUCTL_BEQ:  out.branch_outcome = in.op1 == in.op2     ? TAKEN : NOT_TAKEN;

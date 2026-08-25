@@ -17,8 +17,6 @@ module forward_unit (
 	// Input from decoder
 	decoder_output_ifc.in decoded,
 	reg_file_output_ifc.in reg_data,
-	reg_ren_ifc.in rr_ifc,
-	reg_ren_ifc.out rr_wb,
 
 	// Feedback from EX stage
 	alu_pass_through_ifc.in ex_ctl,
@@ -43,25 +41,21 @@ module forward_unit (
 		input mips_core_pkg::MipsReg r_source;
 		input logic [`DATA_WIDTH - 1 : 0] d_source;
 		begin
-			if (uses_rs && (rs_addr == r_source) && condition) begin
+			if (uses_rs && (rs_addr == r_source) && condition)
 				out.rs_data = d_source;
-				rr_wb.busy_bits[rs_addr] = 0;	//this will throw a fit probably
-			end
 		end
 	endtask
 
 	task check_forward_rt;
 		input logic uses_rt;
-		input logic [5:0] rt_addr;
+		input mips_core_pkg::MipsReg rt_addr;
 
 		input logic condition;
 		input mips_core_pkg::MipsReg r_source;
 		input logic [`DATA_WIDTH - 1 : 0] d_source;
 		begin
-			if (uses_rt && (rt_addr == r_source) && condition) begin
+			if (uses_rt && (rt_addr == r_source) && condition)
 				out.rt_data = d_source;
-				rr_wb.busy_bits[rt_addr] = 0;	//this will also probably throw a fit
-			end
 		end
 	endtask
 
@@ -86,18 +80,18 @@ module forward_unit (
 		out.rt_data = reg_data.rt_data;
 
 		// Forward WB stage
-		check_forward(rr_ifc.next_instr.uses_rs, rr_ifc.next_instr.uses_rt,
-			rr_ifc.next_instr.rs_phys, rr_ifc.next_instr.rt_phys,
+		check_forward(decoded.uses_rs, decoded.uses_rt,
+			decoded.rs_addr, decoded.rt_addr,
 			wb.uses_rw, wb.rw_addr, wb.rw_data);
 
 		// Forward MEM stage
-		check_forward(rr_ifc.next_instr.uses_rs, rr_ifc.next_instr.uses_rt,
-			rr_ifc.next_instr.rs_phys, rr_ifc.next_instr.rt_phys,
+		check_forward(decoded.uses_rs, decoded.uses_rt,
+			decoded.rs_addr, decoded.rt_addr,
 			mem.uses_rw, mem.rw_addr, mem.rw_data);
 
 		// Forward EX stage
-		check_forward(rr_ifc.next_instr.uses_rs, rr_ifc.next_instr.uses_rt,
-			rr_ifc.next_instr.rs_phys, rr_ifc.next_instr.rt_phys,
+		check_forward(decoded.uses_rs, decoded.uses_rt,
+			decoded.rs_addr, decoded.rt_addr,
 			ex_data.valid & ex_ctl.uses_rw & ~ex_ctl.is_mem_access,
 			ex_ctl.rw_addr, ex_data.result);
 	end
@@ -105,11 +99,8 @@ module forward_unit (
 	always_comb
 	begin
 		o_lw_hazard = ex_data.valid & ex_ctl.uses_rw & ex_ctl.is_mem_access
-			& ((rr_ifc.next_instr.uses_rs & (rr_ifc.next_instr.rs_phys == ex_ctl.rw_addr))
-				| (rr_ifc.next_instr.uses_rt & (rr_ifc.next_instr.rt_phys == ex_ctl.rw_addr))
-				| rr_ifc.busy_bits[rr_ifc.next_instr.rt_phys] | rr_ifc.busy_bits[rr_ifc.next_instr.rs_phys]);
-				// or phys?
-				//added last two ors, should check if either is busy
+			& ((decoded.uses_rs & (decoded.rs_addr == ex_ctl.rw_addr))
+				| (decoded.uses_rt & (decoded.rt_addr == ex_ctl.rw_addr)));
 	end
 
 endmodule

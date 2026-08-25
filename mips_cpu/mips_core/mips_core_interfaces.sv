@@ -94,6 +94,18 @@ interface write_back_ifc ();
 	modport out (output uses_rw, rw_addr, rw_data);
 endinterface
 
+// The instruction cache returns up to FE_WIDTH contiguous words from the line
+// containing the current pc. word_valid marks how many of them actually fall
+// inside that line, so a fetch near the end of a line simply delivers fewer.
+interface fetch_output_ifc ();
+	logic valid;
+	logic [FE_WIDTH - 1 : 0] word_valid;
+	logic [`DATA_WIDTH - 1 : 0] data [FE_WIDTH];
+
+	modport in  (input valid, word_valid, data);
+	modport out (output valid, word_valid, data);
+endinterface
+
 interface hazard_control_ifc ();
 	// Stall signal has higher priority
 	logic flush;	// Flush signal of the previous stage
