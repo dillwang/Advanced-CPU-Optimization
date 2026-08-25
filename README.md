@@ -445,12 +445,14 @@ so cycles and CPI carry all the information.
 
 | benchmark | baseline (in-order) | + caches | + front end | + non-blocking | + memory spec. | + window sizing | + wide fetch | **+ 3-wide** | speedup | IPC |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| nqueens   | 1,722,402  | 890,370    | 807,339    | 764,041    | 763,961    | 763,332    | 757,970    | **642,551**    | **2.68×** | 1.58 |
-| quickSort | 9,572,553  | 5,492,808  | 5,240,726  | 4,528,689  | 4,235,844  | 3,495,796  | 3,400,154  | **3,024,375**  | **3.17×** | 1.36 |
-| esift2    | 21,375,975 | 5,814,714  | 4,834,600  | 4,835,486  | 4,835,486  | 4,835,133  | 4,557,362  | **3,333,501**  | **6.41×** | **2.36** |
-| coin      | 35,944,392 | 34,162,087 | 27,294,090 | 26,211,879 | 26,212,489 | 25,207,827 | 21,405,644 | **17,682,325** | **2.03×** | **2.02** |
+| nqueens   | 1,722,402  | 890,370    | 807,339    | 764,041    | 763,961    | 763,332    | 757,970    | **618,655**    | **2.78×** | 1.64 |
+| quickSort | 9,572,553  | 5,492,808  | 5,240,726  | 4,528,689  | 4,235,844  | 3,495,796  | 3,400,154  | **2,910,430**  | **3.29×** | 1.41 |
+| esift2    | 21,375,975 | 5,814,714  | 4,834,600  | 4,835,486  | 4,835,486  | 4,835,133  | 4,557,362  | **3,294,956**  | **6.49×** | **2.38** |
+| coin      | 35,944,392 | 34,162,087 | 27,294,090 | 26,211,879 | 26,212,489 | 25,207,827 | 21,405,644 | **17,160,099** | **2.09×** | **2.08** |
 
-Geometric mean **3.24×**, with two benchmarks past IPC 2.0 against a ceiling that is now 3.0. The columns are cumulative: the out-of-order core at the original 2 KB
+Geometric mean **3.34×**, with two benchmarks past IPC 2.0 against a ceiling that is now 3.0. The
+last column also folds in eight-word instruction cache lines with `FETCH_WIDTH` 8. The columns are
+cumulative: the out-of-order core at the original 2 KB
 caches, then 8 KB instruction cache and 4-way 16 KB data cache, then prediction moved into fetch
 with a branch target buffer and the D-cache port pipelined, then the data cache made non-blocking,
 then loads allowed to speculate past unresolved stores, then the window sized against
@@ -728,6 +730,37 @@ a fetch cycle of its own.
 The relaxation is kept because it is a small real gain where the group was binding — quickSort
 1.009×, nqueens 1.008×, +0.4% geometric mean, and all four still match their traces, so the
 delay-slot reasoning held even though the sizing did not.
+
+#### Eight-word lines, and a cache result that went the other way
+
+The mechanism that survived both widenings is a branch landing in the **last pushed slot**, which
+forces its delay slot into a fetch cycle of its own. At a four-word group that is roughly one branch
+in four; at eight it is one in eight. So the instruction cache was regeometried to eight-word lines
+at the same 8 KB — 2 ways × 128 sets × 8 words — and `FETCH_WIDTH` raised to 8.
+
+| benchmark | four-word lines | eight-word lines | gain |
+| --- | --- | --- | --- |
+| quickSort | 3,024,375  | **2,910,430**  | **1.039×** |
+| nqueens   | 642,551    | **618,655**    | **1.039×** |
+| coin      | 17,682,325 | **17,160,099** | 1.030× |
+| esift2    | 3,333,501  | **3,294,956**  | 1.012× |
+
+The first change in a long while to help all four. The short-fetch mechanism is now essentially
+dead — coin accepts a full group of three on **97.3%** of cycles:
+
+| accepted one instruction of three | four-word | eight-word |
+| --- | --- | --- |
+| coin      | 5,711,492 | **139,617** (0.81%) |
+| esift2    | 555,595   | **25** |
+| quickSort | 299,915   | 111,357 |
+
+**The interesting part is the cache.** Halving the set count from 256 to 128 to pay for the longer
+lines should cost hit rate, and nqueens is the most instruction-cache-sensitive of the four. It went
+the other way: nqueens' instruction misses fell from 16,814 to **9,653** and its stall cycles from
+16,560 to **8,777**, both roughly halved, for the same 8 KB. Instruction fetch is sequential enough
+that an eight-word line fetches the next four words for free, and that is worth more than the sets
+it costs. The equivalent trade on the *data* side was measured earlier and lost badly — the two
+sides of the machine do not behave alike, and neither result generalises to the other.
 
 ### What actually bounds the window
 
