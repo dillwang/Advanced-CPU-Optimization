@@ -193,15 +193,38 @@ flow_candidates() {
 # Failing an executable, an importable package is just as good: LibreLane is a
 # Python module and `python -m librelane` is a documented way in.
 flow_python_path() {
-	local r p
+	local r p hit
 	while read -r r; do
 		[ -d "$r" ] || continue
 		for p in "$r"/lib/python*/site-packages "$r"/lib64/python*/site-packages \
 		         "$r"/venv/lib/python*/site-packages "$r"; do
 			[ -d "$p/librelane" ] && { printf '%s\n' "$p"; return 0; }
 		done
+		# The shallow guesses miss some layouts; look properly before moving on
+		# to the next root, so the root nearest the PDK gets a fair chance.
+		hit="$(find "$r" -maxdepth 6 -type d -name librelane \
+			-exec test -f '{}/__main__.py' \; -print 2>/dev/null | head -1)"
+		[ -n "$hit" ] && { printf '%s\n' "$(dirname "$hit")"; return 0; }
 	done < <(flow_roots)
 	return 1
+}
+
+# The flow and the PDK are versioned together. Picking a dev build to drive a
+# release PDK is the kind of mismatch that produces a confusing failure three
+# steps in, so say so plainly rather than let it pass.
+warn_version_skew() {
+	local used="$1"
+	local pdkroot="${PDK_ROOT%/pdks}"
+	[ -n "$pdkroot" ] || return 0
+	case "$used" in
+	"$pdkroot"*) return 0 ;;
+	esac
+	warn "the flow and the PDK come from different installs:
+     flow $used
+     pdk  $pdkroot
+     If a step fails oddly, point -r at the PDK beside the flow, or set
+     \$LIBRELANE to the entry point beside the PDK."
+	return 0
 }
 
 find_flow() {
@@ -222,10 +245,12 @@ find_flow() {
 		esac
 		FLOW_CMD="$c"
 		ok "found $FLOW_CMD off PATH"
+		warn_version_skew "$c"
 	elif c="$(flow_python_path)" && [ -n "$c" ]; then
 		FLOW_KIND=librelane
 		FLOW_CMD="env PYTHONPATH=$c${PYTHONPATH:+:$PYTHONPATH} $PY -m librelane"
 		ok "importing librelane from $c"
+		warn_version_skew "$c"
 	elif [ "$DRY" = 1 ]; then
 		FLOW_KIND=librelane; FLOW_CMD=librelane
 		warn "no flow installed; --dry-run assumes LibreLane"
@@ -406,7 +431,13 @@ src_args() {
 	fi
 }
 
-modules()      { sed -n 's/^module[[:space:]][[:space:]]*\([A-Za-z_][A-Za-z0-9_$]*\).*/\1/p' "$FLAT" | sort; }
+# Ask the config generator, so this answers for whichever frontend is in use.
+# It used to read $FLAT directly, which does not exist under --frontend slang.
+modules() {
+	local src=()
+	while IFS= read -r line; do src+=("$line"); done < <(src_args)
+	"$PY" "$HERE/scripts/gen_config.py" --list-modules "${src[@]}"
+}
 block_list()   { modules | grep -vx 'mips_core'; }
 
 do_list() {

@@ -191,6 +191,8 @@ def main():
     p.add_argument("module", nargs="?")
     p.add_argument("--probe", action="store_true",
                    help="describe every module in the file and exit")
+    p.add_argument("--list-modules", action="store_true",
+                   help="print one hardenable module name per line and exit")
     p.add_argument("--verilog", default="",
                    help="the sv2v-flattened Verilog (sv2v frontend)")
     p.add_argument("--sv-file", action="append", default=[],
@@ -244,6 +246,11 @@ def main():
         mods, owner, support = parse_modules(a.verilog), {}, []
         src_desc = a.verilog
 
+    if a.list_modules:
+        for n in sorted(mods):
+            if n != "sram":
+                print(n)
+        return
     if a.probe:
         probe_mods(mods)
         return
