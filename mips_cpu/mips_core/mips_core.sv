@@ -114,6 +114,10 @@ module mips_core (
 	logic mem_d_cache_fill_valid;
 	mips_core_pkg::mshr_id_t mem_d_cache_fill_id;
 
+	logic pf_miss_valid, pf_hit, pf_inv_valid;
+	logic [`ADDR_WIDTH - 1 : 0] pf_miss_addr, pf_inv_addr;
+	logic [`DATA_WIDTH - 1 : 0] pf_line [8];
+
 	axi_write_address axi_write_address();
 	axi_write_data axi_write_data();
 	axi_write_response axi_write_response();
@@ -123,8 +127,14 @@ module mips_core (
 	axi_write_address mem_write_address[1]();
 	axi_write_data mem_write_data[1]();
 	axi_write_response mem_write_response[1]();
-	axi_read_address mem_read_address[3]();
-	axi_read_data mem_read_data[3]();
+	// Read master ids: 0 i-cache, 1 d-cache, 2 stream buffer, 3 d-cache again,
+	// 4 data prefetcher. The d-cache takes two so that it can have more than
+	// four line fills in flight; the memory model's limit is per id. The
+	// prefetcher has its own so that speculative traffic can never fill the
+	// queue the demand misses use -- which is exactly how the first attempt at
+	// a data prefetcher managed to be worse than none.
+	axi_read_address mem_read_address[5]();
+	axi_read_data mem_read_data[5]();
 
 	// ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 	// |||| Front end
@@ -238,7 +248,12 @@ module mips_core (
 		.done
 	);
 
-	d_cache D_CACHE (
+	// 4 ways x 256 sets x 8 words = 32 KB. Both changes off the 4-word 16 KB
+	// version are quickSort's, and they compound: the longer line is worth
+	// 1.039x (misses 87,593 -> 72,846, the same spatial win the i-cache got),
+	// and the capacity on top of it another 1.065x (-> 53,253). esift2 is
+	// indifferent to the capacity -- its working set fits either way.
+	d_cache #(.INDEX_WIDTH(8), .BLOCK_OFFSET_WIDTH(3), .ASSOCIATIVITY(4)) D_CACHE (
 		.clk, .rst_n,
 
 		.in(mem_d_cache_input),
@@ -251,16 +266,41 @@ module mips_core (
 
 		.mem_read_address(mem_read_address[1]),
 		.mem_read_data   (mem_read_data[1]),
+		.mem_read_address_b(mem_read_address[3]),
+		.mem_read_data_b   (mem_read_data[3]),
+
+		.o_pf_miss_valid(pf_miss_valid),
+		.o_pf_miss_addr (pf_miss_addr),
+		.i_pf_hit       (pf_hit),
+		.i_pf_line      (pf_line),
+		.o_pf_inv_valid (pf_inv_valid),
+		.o_pf_inv_addr  (pf_inv_addr),
 
 		.mem_write_address(mem_write_address[0]),
 		.mem_write_data(mem_write_data[0]),
 		.mem_write_response(mem_write_response[0])
 	);
 
+	// 64 lines, not 16. A prefetch nobody asks for holds its slot until the
+	// round robin victim comes round to it, so a shallow buffer spends most of
+	// the run full: at 16 lines quickSort reported pf_no_slot on 51,717 cycles
+	// and the deeper buffer cuts that to 4,134, worth 1.027x on its own.
+	d_prefetcher #(.BLOCK_OFFSET_WIDTH(3), .DEPTH(64), .STREAMS(16)) D_PREFETCHER (
+		.clk, .rst_n,
+		.i_miss_valid (pf_miss_valid),
+		.i_miss_addr  (pf_miss_addr),
+		.o_hit        (pf_hit),
+		.o_line       (pf_line),
+		.i_inv_valid  (pf_inv_valid),
+		.i_inv_addr   (pf_inv_addr),
+		.mem_read_address(mem_read_address[4]),
+		.mem_read_data   (mem_read_data[4])
+	);
+
 	// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 	// xxxx Memory Arbiter
 	// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-	memory_arbiter #(.WRITE_MASTERS(1), .READ_MASTERS(3)) MEMORY_ARBITER (
+	memory_arbiter #(.WRITE_MASTERS(1), .READ_MASTERS(5)) MEMORY_ARBITER (
 		.clk, .rst_n,
 		.axi_write_address,
 		.axi_write_data,

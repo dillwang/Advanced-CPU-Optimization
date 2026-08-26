@@ -335,7 +335,8 @@ module ooo_backend (
 				0: stats_event("issue_0");
 				1: stats_event("issue_1");
 				2: stats_event("issue_2");
-				default: stats_event("issue_3");
+				3: stats_event("issue_3");
+				default: stats_event("issue_4");
 			endcase
 		end
 	end

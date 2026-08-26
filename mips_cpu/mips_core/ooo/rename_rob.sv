@@ -757,12 +757,15 @@ module rename_rob (
 	logic [31:0] ls_q_addr [LS_REPORT_LAG];
 	logic [31:0] ls_q_data [LS_REPORT_LAG];
 
+	logic recovering;			// between a redirect and the next dispatch
+
 	always_ff @(posedge clk)
 	begin
 		if (~rst_n)
 		begin
 			for (int i = 0; i < WB_REPORT_LAG; i++) wb_q_valid[i] = 1'b0;
 			for (int i = 0; i < LS_REPORT_LAG; i++) ls_q_valid[i] = 1'b0;
+			recovering <= 1'b0;
 		end
 		else
 		begin
@@ -819,6 +822,13 @@ module rename_rob (
 			end
 
 			if (squash) stats_event("mispredict");
+			// What a squash actually costs: cycles from the redirect until
+			// rename gets an instruction in again. Accuracy and refill depth
+			// multiply, and knowing which one dominates decides whether to
+			// spend on the predictor or on the pipe in front of it.
+			if (redirect_valid) recovering <= 1'b1;
+			else if (dispatch_go) recovering <= 1'b0;
+			if (recovering && !dispatch_go) stats_event("squash_refill");
 			if (v_hit) stats_event("memdep_violation");
 			if (v_hit && (v_idx != mv_rob_idx)) stats_event("memdep_delayslot");
 			if (mv_valid && !rob[mv_rob_idx].valid) stats_event("memdep_stale");
@@ -831,12 +841,14 @@ module rename_rob (
 			if (n_live == 1) stats_event("fe_offer_1");
 			if (n_live == 2) stats_event("fe_offer_2");
 			if (n_live == 3) stats_event("fe_offer_3");
+			if (n_live == 4) stats_event("fe_offer_4");
 			// And how many actually got in.
 			if (dispatch_go)
 			begin
 				if (live_n == 1) stats_event("disp_1");
 				if (live_n == 2) stats_event("disp_2");
 				if (live_n == 3) stats_event("disp_3");
+				if (live_n == 4) stats_event("disp_4");
 			end
 			// Which resource ran out. A stalled cycle can be short of more than
 			// one, so these sum to more than rename_stall.

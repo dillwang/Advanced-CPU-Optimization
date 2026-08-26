@@ -112,7 +112,7 @@ parameter int IQ_ENTRIES   = 32;
 // 64 reorder buffer entries, doubling this measured zero to the cycle.
 parameter int LSQ_ENTRIES  = 32;
 parameter int LSQ_IDX_W    = 5;		// $clog2(LSQ_ENTRIES)
-parameter int FE_WIDTH     = 3;		// decode / rename / dispatch / commit width
+parameter int FE_WIDTH     = 4;		// decode / rename / dispatch / commit width
 // How many words fetch pulls out of the instruction cache per cycle. This is
 // deliberately wider than FE_WIDTH and is the whole point of the fetch buffer:
 // at two words a fetch pair straddling the end of a cache line delivers one
@@ -127,7 +127,7 @@ parameter int FE_WIDTH     = 3;		// decode / rename / dispatch / commit width
 // (nqueens 16,814 -> 9,653) rather than costing hit rate for the halved set
 // count, because instruction fetch is overwhelmingly sequential.
 parameter int FETCH_WIDTH  = 8;
-parameter int ISSUE_WIDTH  = 3;		// instructions started per cycle
+parameter int ISSUE_WIDTH  = 4;		// instructions started per cycle
 // One writeback port per issue port for the ALUs, plus one for load data
 // returning from the load/store queue an arbitrary number of cycles later.
 parameter int NUM_WB       = ISSUE_WIDTH + 1;
@@ -206,8 +206,8 @@ parameter int BTB_TAG_W    = 26 - BTB_IDX_W - 2;	// ADDR_WIDTH - index - 2
 // flight at once, and so how many independent misses can overlap instead of
 // serialising. The memory model accepts 4 reads per master id, so 4 is the most
 // the interface can carry.
-parameter int NUM_MSHR   = 4;
-parameter int MSHR_IDX_W = 2;		// $clog2(NUM_MSHR)
+parameter int NUM_MSHR   = 8;
+parameter int MSHR_IDX_W = 3;		// $clog2(NUM_MSHR)
 
 // Memory dependence prediction. A load is normally held until every older
 // store has computed its address, which makes disambiguation exact and replay

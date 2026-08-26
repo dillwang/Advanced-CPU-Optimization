@@ -94,7 +94,23 @@ module d_cache #(
     axi_write_data.master mem_write_data,
     axi_write_response.master mem_write_response,
     axi_read_address.master mem_read_address,
-    axi_read_data.master mem_read_data
+    axi_read_data.master mem_read_data,
+    // A second read channel, on its own AXI id. The memory model accepts four
+    // outstanding reads PER id, so one id caps the cache at four misses in
+    // flight however many miss status registers it is given.
+    axi_read_address.master mem_read_address_b,
+    axi_read_data.master mem_read_data_b,
+
+    // Prefetcher. The miss is offered in the cycle it is taken; if the line is
+    // already sitting beside the cache it comes back whole and the fill starts
+    // immediately instead of a hundred cycles later.
+    output logic o_pf_miss_valid,
+    output logic [`ADDR_WIDTH - 1 : 0] o_pf_miss_addr,
+    input  logic i_pf_hit,
+    input  logic [`DATA_WIDTH - 1 : 0] i_pf_line [1 << BLOCK_OFFSET_WIDTH],
+    // A dirty line leaving here is stale in the prefetcher.
+    output logic o_pf_inv_valid,
+    output logic [`ADDR_WIDTH - 1 : 0] o_pf_inv_addr
 );
     localparam TAG_WIDTH = `ADDR_WIDTH - INDEX_WIDTH - BLOCK_OFFSET_WIDTH - 2;
     localparam LINE_SIZE = 1 << BLOCK_OFFSET_WIDTH;
@@ -228,7 +244,7 @@ module d_cache #(
     // store cannot commit its word at the same time. Loads are unaffected; they
     // use the read port.
     logic bank_write_busy;
-    assign bank_write_busy = mem_read_data.RVALID;
+    assign bank_write_busy = rd_valid;
 
     logic store_defer;
 
@@ -351,18 +367,66 @@ module d_cache #(
     assign o_mshr_id = mshr_match ? mshr_match_id : m_tail;
 
     // ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+    // |||| The two read channels
+    // ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+    // Requests alternate between the channels, so N misses in flight need only
+    // ceil(N/2) outstanding on either id.
+    //
+    // Fills are still retired in ALLOCATION ORDER. AXI only orders responses
+    // within an id, so data for a younger miss on the other channel can arrive
+    // first; it is left on the bus by holding that channel's RREADY low until
+    // its turn comes. That keeps m_head, o_fill_id and the whole replay path
+    // exactly as they were, and the cache has a single write port into the
+    // data banks, so the return beats would have been serialised anyway.
+    //
+    // The cost is not zero in principle: memory_arbiter's read data splitter
+    // is ONE shared pipeline register for every read master, so a beat held
+    // here also blocks i-cache and stream buffer returns behind it. It is
+    // measured rather than assumed -- esift2 is cycle identical with and
+    // without the second channel (2,696,938 either way) and quickSort is
+    // faster with it, because a channel only ever holds data while the other
+    // one is mid-burst. Revisit this if the miss rate ever rises far enough
+    // that the two channels are busy at the same time.
+    // A miss whose line came from the prefetcher needs no memory request at
+    // all. The line is latched here in the cycle the miss is taken, so the
+    // prefetcher's slot is free again immediately and nothing has to be held
+    // against reuse while this fill drains.
+    logic m_pf [NUM_MSHR];
+    logic [`DATA_WIDTH - 1 : 0] m_data [NUM_MSHR][LINE_SIZE];
+
+    logic m_port [NUM_MSHR];    // channel each outstanding fill went out on
+    logic send_port;            // channel the next request will use
+    logic fill_port;
+    assign fill_port = m_port[m_head];
+
+    // Which beat of the line is being written. The one-hot databank_select
+    // drives the bank enables; this is the same count in binary, for indexing
+    // a line that came from the prefetcher.
+    logic [BLOCK_OFFSET_WIDTH - 1 : 0] fill_beat;
+
+    logic pf_fill;
+    assign pf_fill = (m_count != 0) && m_valid[m_head] && m_pf[m_head];
+
+    logic rd_valid;
+    logic [`DATA_WIDTH - 1 : 0] rd_data;
+    assign rd_valid = pf_fill ? 1'b1
+        : (fill_port ? mem_read_data_b.RVALID : mem_read_data.RVALID);
+    assign rd_data  = pf_fill ? m_data[m_head][fill_beat]
+        : (fill_port ? mem_read_data_b.RDATA  : mem_read_data.RDATA);
+
+    // ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
     // |||| Bank writes
     // ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
     logic [LINE_SIZE - 1 : 0] databank_select;
     logic last_refill_word;
-    assign last_refill_word = databank_select[LINE_SIZE - 1] & mem_read_data.RVALID;
+    assign last_refill_word = databank_select[LINE_SIZE - 1] & rd_valid;
 
     always_comb
     begin
         for (int i = 0; i < ASSOCIATIVITY; i++)
             databank_we[i] = '0;
 
-        if (mem_read_data.RVALID)
+        if (rd_valid)
             databank_we[m_way[m_head]] = databank_select;
         else if (hit && (in.mem_action == WRITE))
             databank_we[hit_way][i_block_offset] = 1'b1;
@@ -370,9 +434,9 @@ module d_cache #(
 
     always_comb
     begin
-        if (mem_read_data.RVALID)
+        if (rd_valid)
         begin
-            databank_wdata = mem_read_data.RDATA;
+            databank_wdata = rd_data;
             databank_waddr = m_index[m_head];
         end
         else
@@ -394,23 +458,42 @@ module d_cache #(
     assign o_fill_valid = last_refill_word;
     assign o_fill_id = m_head;
 
+    assign o_pf_miss_valid = do_allocate;
+    assign o_pf_miss_addr = in.addr;
+    // The victim's address, not the missing one: that is the line whose only
+    // up to date copy is about to be the writeback queue's.
+    assign o_pf_inv_valid = do_allocate && victim_dirty;
+    assign o_pf_inv_addr = {tagbank_rdata[victim_way], i_index,
+        {BLOCK_OFFSET_WIDTH + 2{1'b0}}};
+
     // ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
     // |||| Memory read channel
     // ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
     // Counted rather than derived from the pointers: m_send == m_tail means
     // both "nothing to send" and "everything outstanding" once they wrap.
     logic [MSHR_IDX_W : 0] m_nsend;
-    logic ar_pending;
-    assign ar_pending = (m_nsend != 0);
+    logic ar_pending, ar_skip;
+    assign ar_pending = (m_nsend != 0) && !m_pf[m_send];
+    assign ar_skip    = (m_nsend != 0) &&  m_pf[m_send];
 
     always_comb
     begin
+        // Both channels see the same address; only one is asked for it. The
+        // ARID must equal the arbiter's master index for the response splitter
+        // to route the data back to the right port.
         mem_read_address.ARADDR = {m_tag[m_send], m_index[m_send],
             {BLOCK_OFFSET_WIDTH + 2{1'b0}}};
         mem_read_address.ARLEN = LINE_SIZE;
-        mem_read_address.ARVALID = ar_pending;
+        mem_read_address.ARVALID = ar_pending && !send_port;
         mem_read_address.ARID = 4'd1;
-        mem_read_data.RREADY = 1'b1;
+        mem_read_data.RREADY = !pf_fill && !fill_port;
+
+        mem_read_address_b.ARADDR = {m_tag[m_send], m_index[m_send],
+            {BLOCK_OFFSET_WIDTH + 2{1'b0}}};
+        mem_read_address_b.ARLEN = LINE_SIZE;
+        mem_read_address_b.ARVALID = ar_pending && send_port;
+        mem_read_address_b.ARID = 4'd3;
+        mem_read_data_b.RREADY = !pf_fill && fill_port;
     end
 
     // ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -453,7 +536,8 @@ module d_cache #(
     assign m_pop = last_refill_word;
     assign f_push = do_allocate && victim_dirty;
     assign f_pop = mem_write_response.BVALID && (f_count != 0);
-    assign ar_sent = mem_read_address.ARVALID && mem_read_address.ARREADY;
+    assign ar_sent = (mem_read_address.ARVALID && mem_read_address.ARREADY)
+        || (mem_read_address_b.ARVALID && mem_read_address_b.ARREADY);
     assign w_sent = mem_write_data.WVALID && mem_write_data.WREADY
         && mem_write_data.WLAST;
 
@@ -475,6 +559,13 @@ module d_cache #(
             m_tail <= '0;
             m_count <= '0;
             m_nsend <= '0;
+            send_port <= 1'b0;
+            fill_beat <= '0;
+            for (int i = 0; i < NUM_MSHR; i++)
+            begin
+                m_port[i] = 1'b0;
+                m_pf[i] = 1'b0;
+            end
             f_head <= '0;
             f_send <= '0;
             f_tail <= '0;
@@ -492,6 +583,10 @@ module d_cache #(
                 m_tag[m_tail] <= i_tag;
                 m_index[m_tail] <= i_index;
                 m_way[m_tail] <= victim_way;
+                m_pf[m_tail] <= i_pf_hit;
+                if (i_pf_hit)
+                    for (int j = 0; j < LINE_SIZE; j++)
+                        m_data[m_tail][j] <= i_pf_line[j];
                 m_tail <= mshr_id_t'(m_tail + 1'b1);
 
                 // The way stops answering lookups now. Its data is still in the
@@ -526,13 +621,25 @@ module d_cache #(
             end
 
             // ---- read requests go out in allocation order ----
+            // Alternating the channel here rather than at allocation keeps the
+            // two ids evenly loaded even when misses arrive in bursts.
             if (ar_sent)
+            begin
+                m_port[m_send] <= send_port;
+                m_send <= mshr_id_t'(m_send + 1'b1);
+                send_port <= ~send_port;
+            end
+            else if (ar_skip)
                 m_send <= mshr_id_t'(m_send + 1'b1);
 
             // ---- returning line data ----
-            if (mem_read_data.RVALID)
+            if (rd_valid)
+            begin
                 databank_select <= {databank_select[LINE_SIZE - 2 : 0],
                     databank_select[LINE_SIZE - 1]};
+                fill_beat <= last_refill_word ? '0
+                    : BLOCK_OFFSET_WIDTH'(fill_beat + 1'b1);
+            end
 
             if (last_refill_word)
             begin
@@ -583,7 +690,7 @@ module d_cache #(
             f_count <= f_count + {{MSHR_IDX_W{1'b0}}, f_push}
                                 - {{MSHR_IDX_W{1'b0}}, f_pop};
             m_nsend <= m_nsend + {{MSHR_IDX_W{1'b0}}, m_push}
-                                - {{MSHR_IDX_W{1'b0}}, ar_sent};
+                                - {{MSHR_IDX_W{1'b0}}, (ar_sent || ar_skip)};
             f_nsend <= f_nsend + {{MSHR_IDX_W{1'b0}}, f_push}
                                 - {{MSHR_IDX_W{1'b0}}, w_sent};
         end

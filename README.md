@@ -526,6 +526,211 @@ they were not what the gap to the perceptron was made of. The corrector was.
 
 ---
 
+# Going Four Wide, and What Memory Actually Costs
+
+Four changes, in the order the counters asked for them. Three of the four
+reverse a conclusion recorded earlier in this file, and in every case the
+earlier verdict had been measured on a materially different machine.
+
+### Four wide, which was supposed to be a dead end
+
+The entry under [what actually bounds the window](#what-actually-bounds-the-window)
+said 4-wide was not worth building, on the grounds that three or more
+instructions were ready on only 8.8% of coin's cycles. That was measured
+against a **64-entry reorder buffer behind a 2-wide front end**. With a 128
+entry window and a 3-wide front end filling it, the same counter reads 68% on
+esift2, and `issue_3` -- the machine issuing its full width -- fires on 68% of
+its cycles. It was at the ceiling two cycles in three.
+
+`FE_WIDTH` and `ISSUE_WIDTH` turned out to be fully parameterised already: the
+ALUs are a generate loop, the register file ports scale as `2 * W` read and
+`W + 1` write, and rename and commit loop over `FE_WIDTH`. The change is two
+parameters and three statistics counters.
+
+| benchmark | 3-wide | 4-wide | speedup |
+| --- | --- | --- | --- |
+| coin      | 16,429,702 | **12,838,826** | **1.280x** |
+| esift2    |  3,296,264 |  **2,696,938** | **1.222x** |
+| nqueens   |    587,259 |    **535,271** | 1.097x |
+| quickSort |  2,863,656 |  **2,741,565** | 1.045x |
+
+esift2's free list stall -- 447,156 cycles, and 100% of its dispatch stalls at
+3-wide -- went to **zero**, because at 4-wide instructions retire fast enough
+to recycle their own tags. A `PHYS_REGS` 192 experiment was queued to fix that
+stall and was abandoned unfinished, since the number it would have reported no
+longer meant anything.
+
+### The data cache line, and then its capacity
+
+Both are quickSort's, and they compound. The instruction cache halved its own
+misses when it went to 8-word lines; the same change on the data side does the
+same thing for the same reason.
+
+| quickSort | cycles | IPC | D-cache misses |
+| --- | --- | --- | --- |
+| 16 KB, 4-word lines | 2,732,905 | 1.50 | 87,593 |
+| 16 KB, 8-word lines | 2,630,100 | 1.56 | 72,846 |
+| **32 KB, 8-word lines** | **2,469,870** | **1.66** | **53,253** |
+
+**1.107x for no extra capacity in the first step and one doubling in the
+second.** esift2 is indifferent to the capacity -- its working set fits either
+way -- and 64 KB buys another 1.065x on quickSort alone, which is not obviously
+worth the area.
+
+### A second AXI id, which fixed the structure and bought nothing
+
+`Dmiss_regs_full` was 205,478 cycles, 7.2% of quickSort's run, with 12,581
+misses refused outright, and this file called it "the clearest remaining
+ceiling on the one memory-bound benchmark". The memory model allows four
+outstanding reads **per AXI id**, so the fix is a second id: requests alternate
+between ARID 1 and ARID 3, and `NUM_MSHR` goes to 8.
+
+| quickSort | before | after |
+| --- | --- | --- |
+| cycles | 2,863,656 | 2,859,460 (**1.0015x**) |
+| `Dmiss_regs_full` | 205,478 | **0** |
+| `Dmiss_refused` | 12,581 | **14** |
+| `Dmiss_inflight` | 1,007,068 | 999,208 |
+
+The registers never fill again and no miss is ever refused again, and it is
+worth **0.15%**. `Dmiss_inflight` barely moves, which is the whole story: the
+misses were already overlapping as far as the *program* allows. They are
+dependent, so more capacity finds no more independent misses to run in
+parallel. This is the same trap as coin's `stall_lsq`, in the memory domain --
+**a full structure is not automatically a cost.**
+
+It is kept because it is correct, costs nothing, and removes a cap that would
+otherwise distort every later memory measurement.
+
+Fills still retire in allocation order; the younger channel's data waits on the
+bus with RREADY low. That is not free in principle, because `memory_arbiter`'s
+read data splitter is one shared pipeline register for every read master, so a
+held beat blocks the instruction cache behind it. It was measured rather than
+assumed: esift2 is **cycle identical** with and without the second channel, and
+quickSort is faster with it.
+
+### The prefetcher, which this file called a dead end
+
+It was a dead end. The note read: 0.002% on esift2, *negative* on nqueens, 13
+prefetches across all of coin, deleted from `d_cache.sv`. The same note also
+recorded that the miss addresses were highly predictable -- 51.3% same-delta on
+quickSort, 99.5% on esift2 -- so **prediction was never what failed. Absorption
+was.** The cache was blocking, with four registers on one id, so a prefetch
+could only ever take a resource a demand miss was about to need.
+
+That is no longer true, so `d_prefetcher.sv` is built the other way round: a
+structure off to the side with its own storage, its own AXI id and its own
+port, never competing for a miss register. It is asked about a line only when
+the cache takes a demand miss, and on a hit the whole line is handed over in
+one cycle and latched into the register, turning a hundred cycle miss into a
+fill that starts immediately. It never installs into the cache and never probes
+the cache's tags -- so it cannot put two ways of a set under one tag, and it
+does not need the bank read port the demand path owns.
+
+Two engines feed one queue. **Spatial**: a table of streams matched by nearness
+rather than by pc, since the cache is never told which instruction missed; a
+repeated delta promotes a stream to confident and it runs `DEGREE` lines ahead.
+**Temporal**: a table remembering which line missed after which, for the
+repeats a stride cannot catch.
+
+| | before | after | prefetch hit rate |
+| --- | --- | --- | --- |
+| quickSort | 2,469,870 | **2,154,366** (1.146x) | 69% |
+| esift2    | 2,655,842 | **2,615,127** (1.016x) | **99.2%** |
+| nqueens   |   531,470 |   **527,256** (1.008x) | 84% |
+
+#### The bug the counters found
+
+The first working version was worth 0.15% on quickSort, and `pf_spatial` said
+why: a confident stream had been detected **7,806 times** and the prefetcher had
+issued **146 requests**. There was no replacement policy. A slot is released
+when a demand miss takes its line, so a prefetch nobody asks for holds one
+forever; sixteen of those and the buffer is full for the rest of the run.
+
+esift2 hid the bug completely, at a 99.2% hit rate, because its stream is
+exactly sequential and every line it fetches is demanded. Adding a round robin
+victim took quickSort's `pf_hit` from 41 to 5,527 and `Dmiss_inflight` from
+563,768 to 233,806; going from 16 slots to 64 took `pf_no_slot` from 51,717 to
+4,134 and was worth another 1.027x.
+
+### What a squash actually costs, and where quickSort ends up
+
+`squash_refill` counts the cycles between a redirect and rename getting an
+instruction in again. It was added to decide whether to spend on the predictor
+or on the pipe in front of it, and it answered immediately:
+
+| | squashes | refill cycles | per squash |
+| --- | --- | --- | --- |
+| nqueens   |  36,420 |  41,512 | **1.14** |
+| quickSort | 126,422 | 131,045 | 1.04 |
+| esift2    |  18,790 |  19,585 | 1.04 |
+
+**The front end recovers from a redirect in about one cycle.** A 32-deep fetch
+buffer at `FETCH_WIDTH` 8, with the target buffer redirecting in fetch, refills
+essentially immediately. So the entire cost of a misprediction is wrong-path
+work already dispatched, and shortening the redirect path would gain nothing.
+That retired a plan to do exactly that.
+
+What it costs instead is visible in the dispatch counters. On quickSort the
+front end offers 0/1/2/3/4 instructions on 248,284 / 180,959 / 372,946 /
+484,147 / 868,021 cycles, which sums to the cycle count; dispatch pushed
+**5,508,199** instructions and only **4,103,867** committed.
+
+**1,404,332 dispatched instructions -- 25.5% of everything the machine did --
+were thrown away**, at 123,250 squashes and ~11.4 instructions each. Against
+that, `Dmiss_inflight` is 7.7% of cycles and `rename_stall` 4.0%. Memory went
+from 36% of quickSort's cycles to under 8%; misprediction is now the whole
+remainder, and `wrong_prov` is 123,249 of 123,387 -- 99.9% of the misses are a
+tagged entry matching and being wrong.
+
+There is a second, harder ceiling underneath it. The front end offers 2.716
+instructions per cycle on average and a full four on only 40% of cycles, with
+`fe_line_edge` firing 1,278,852 times -- a fetch starting mid-line gets only the
+words to the end of it, and every redirect lands at an arbitrary pc. So even
+perfect branch prediction would leave quickSort near 2.7 IPC. Its branches are
+comparisons on unsorted data; 87.6% is close to what is there.
+
+### The load/store queue, and the same trap for the third time
+
+At 4-wide, coin's `stall_only_lsq` reads **3,415,793 cycles -- 26.6% of its
+run**, by far the largest single stall left anywhere in the suite, and the
+obvious last thing to fix. `LSQ_ENTRIES` 32 -> 64:
+
+| coin | LSQ 32 | LSQ 64 |
+| --- | --- | --- |
+| `stall_only_lsq` | 3,415,793 | **gone** |
+| `stall_only_iq` | 195,795 | **3,593,966** |
+| cycles | 12,836,687 | 12,836,677 |
+
+**3.4 million cycles of stall relieved, worth ten cycles.** The backlog moved
+one structure along and nothing else changed. esift2 gained 348 cycles,
+quickSort was identical to the cycle, nqueens gained 897. Reverted.
+
+This is the third instance in this section alone -- coin's load/store queue
+here, quickSort's miss status registers at 0.15%, and the 256-entry window that
+left esift2 identical to the cycle. **Relieving a full structure buys nothing
+unless there is independent work waiting behind it.** The counter tells you
+where the queue ends, not why. It is the most repeated mistake on this project
+and it survives being written down, so: attribute *what is being waited on*
+before scaling anything.
+
+### A very large window, which is the weakest of the four
+
+Apple-style: `ROB_ENTRIES` and `PHYS_REGS` both to 256.
+
+| | ROB 256 + PRF 256 |
+| --- | --- |
+| quickSort | 2,419,808 (**1.021x**) |
+| esift2 | **identical, to the cycle** |
+| nqueens | identical |
+
+`stall_only_rob` went from 234,022 to 1,463, and `stall_only_iq` rose from
+187,657 to 239,499. The backlog moved one structure along. A deeper window only
+pays if there is independent work behind the miss, and on the one benchmark
+that misses, there is not.
+
+---
+
 # Results
 
 Measured on this repository with the command in [Simulation](#simulation). The correctness bar is
@@ -544,7 +749,26 @@ so cycles and CPI carry all the information.
 | coin      | 35,944,392 | 34,162,087 | 27,294,090 | 26,211,879 | 26,212,489 | 25,207,827 | 21,405,644 | **17,160,099** | **2.09×** | **2.08** |
 
 Geometric mean **3.34×**, with two benchmarks past IPC 2.0 against a ceiling that is now 3.0. The
-last column also folds in eight-word instruction cache lines with `FETCH_WIDTH` 8. The columns are
+last column also folds in eight-word instruction cache lines with `FETCH_WIDTH` 8.
+
+**Branch `tage-sc-l` carries this further.** With the TAGE-SC-L predictor, a 4-wide machine, a
+32 KB data cache on 8-word lines, eight miss registers across two AXI ids and a working data
+prefetcher — all documented in [Statistical Correction](#statistical-correction) and
+[Going Four Wide](#going-four-wide-and-what-memory-actually-costs):
+
+| benchmark | in-order baseline | 3-wide above | **branch `tage-sc-l`** | speedup | IPC (ceiling 4.0) |
+| --- | --- | --- | --- | --- | --- |
+| nqueens   | 1,722,402  |    618,655 |    **527,256** | **3.27×** | 1.93 |
+| quickSort | 9,572,553  |  2,910,430 |  **2,154,366** | **4.44×** | 1.90 |
+| esift2    | 21,375,975 |  3,294,956 |  **2,615,127** | **8.17×** | **3.00** |
+| coin      | 35,944,392 | 17,160,099 | **12,836,687** | **2.80×** | **2.79** |
+
+Geometric mean **4.27×** over the in-order baseline. esift2 and coin sit at 75% and 70% of a
+4-wide ceiling. nqueens and quickSort are both limited by branch misprediction and nothing else:
+quickSort dispatches 5,508,199 instructions to commit 4,103,867, so a quarter of everything the
+machine does is thrown away on wrong paths, against memory at under 8% of cycles.
+
+The columns are
 cumulative: the out-of-order core at the original 2 KB
 caches, then 8 KB instruction cache and 4-way 16 KB data cache, then prediction moved into fetch
 with a branch target buffer and the D-cache port pipelined, then the data cache made non-blocking,
