@@ -179,6 +179,13 @@ needs no snapshot storage at all.
 - 2-wide rename/dispatch/commit, 2 issue ports, 2 ALUs, 1 memory port
 - Single-cycle execute with no bypass network
 
+> These are the sizes this section was written against, and the rest of it describes the machine at
+> that width. It has since been widened twice and the structures resized against measured stall
+> attribution; the current configuration is a **128-entry reorder buffer, 4-wide rename, dispatch,
+> commit and issue, 4 ALUs**, and on branch `tage-sc-l` a 32 KB data cache with a prefetcher beside
+> it. See [What actually bounds the window](#what-actually-bounds-the-window) and
+> [Going Four Wide](#going-four-wide-and-what-memory-actually-costs).
+
 **Wakeup needs no CAM.** The physical register file is written at the end of the cycle an
 instruction executes and read asynchronously, so a result produced in cycle N is readable in cycle
 N+1, and the busy table clears on the same edge. Readiness is therefore just a combinational look
@@ -428,8 +435,13 @@ The instruction cache still refills normally in the background, so lines become 
 a loop that fits will hit in the cache on its next pass. The buffer only covers the streaming case
 the cache is bad at.
 
-The I-cache is 2-way set associative with LRU replacement (2 KB), and now returns **two contiguous
-words per fetch** to feed the 2-wide front end.
+The I-cache is 2-way set associative with LRU replacement, and returns several contiguous words per
+fetch to feed a front end wider than decode. It has since grown to 8 KB on 8-word lines with
+`FETCH_WIDTH` 8 — see [eight-word lines](#eight-word-lines-and-a-cache-result-that-went-the-other-way).
+
+**There is now a data-side prefetcher too**, on branch `tage-sc-l`, built very differently and for
+reasons the [negative result below](#what-the-prefetchers-are-worth) explains — see
+[the prefetcher](#the-prefetcher-which-this-file-called-a-dead-end).
 
 ---
 
@@ -843,8 +855,16 @@ set is exact LRU for two ways and meaningless for four, so it is now a per-set r
 
 ### What the prefetchers are worth
 
-Nothing measurable, on either side of the machine. This is the clearest negative result here and
-worth stating plainly.
+> **Superseded on branch `tage-sc-l`.** The data-side conclusion below was correct for the machine
+> it was measured on — a *blocking* cache with four miss registers on one AXI id, where a prefetch
+> could only ever take a resource a demand miss was about to need. Rebuilt as a structure off to
+> the side with its own storage and its own id, against a non-blocking cache, the same idea is
+> worth **1.146× on quickSort** at a 69% hit rate and 99.2% on esift2. The table below also records
+> that the miss addresses were highly predictable all along, which is exactly the clue that
+> prediction was never the thing failing. See
+> [the prefetcher](#the-prefetcher-which-this-file-called-a-dead-end).
+
+Nothing measurable, on either side of the machine, *at the time this was written*.
 
 | prefetcher | benchmark | D-cache | with | without | difference |
 | --- | --- | --- | --- | --- | --- |
@@ -1182,6 +1202,10 @@ Going further means giving it a second master id, which is design work rather th
 The chooser is close to a wash: it wins slightly on quickSort and loses slightly on nqueens, where
 the perceptron on its own would have been better. gshare is the weaker component throughout.
 
+On branch `tage-sc-l` the tournament predictor is replaced, and the numbers above are the baseline
+it is measured against — nqueens goes 76.9% to **80.6%** and coin 98.0% to **99.1%**. See
+[Statistical Correction](#statistical-correction).
+
 All four benchmarks are checkable. If `coin.ls.txt.bz2` ever fails to decompress, the archive in
 git is intact (md5 `ddb5e9b2a81ebcb95dee219cfebedb1b`) and the working-tree copy has gone bad —
 `rm hexfiles/coin.ls.txt.bz2 && git checkout -- hexfiles/coin.ls.txt.bz2` restores it. Note that
@@ -1191,6 +1215,10 @@ correspondingly longer to simulate.
 ---
 
 ### Where the remaining time goes
+
+*The state of the machine at 3-wide. For where it went next, see
+[Going Four Wide](#going-four-wide-and-what-memory-actually-costs) — every "limited by" in the
+table below has since changed, and two of them turned out to be wrong.*
 
 With the caches fixed, the front end fixed and the data cache no longer blocking, the bottleneck
 moved again, and it is now different on each benchmark. The D-cache column is the share of cycles
@@ -1237,23 +1265,42 @@ the target buffer answers every one of them. `rename_stall` rising after the BTB
 moving downstream — the front end started delivering faster than the back end was draining, which
 is exactly what the pipelined D-cache port then relieved.
 
-#### What is left
+#### What is left, and what became of it
+
+*Every item here was written at 3-wide. Three of the four have since been settled, and two of them
+against what this section predicted — see
+[Going Four Wide](#going-four-wide-and-what-memory-actually-costs).*
 
 - **The miss-status registers, and this one needs design work.** All four are full for 5.0% of
   quickSort's run (`Dmiss_regs_full` 174,208 cycles, up from 0 before the window was sized) and
   8,112 misses are refused outright. `NUM_MSHR` cannot simply be raised: the memory model accepts
   four outstanding reads **per AXI id** and the D-cache uses one, so going further means giving it a
   second master id. That is the clearest remaining ceiling on the one memory-bound benchmark.
+
+  **SETTLED, and this was wrong.** The second master id was built, `NUM_MSHR` went to 8,
+  `Dmiss_regs_full` went to **0** and `Dmiss_refused` 12,581 → 14 — and it was worth **0.15%**.
+  `Dmiss_inflight` barely moved, because quickSort's misses are *dependent*: they were already
+  overlapping as far as the program allows, and more capacity finds no more independent misses.
+  Calling it "the clearest remaining ceiling" was the same mistake as the `LSQ_ENTRIES` entry
+  below, made two bullets away from the warning about it.
 - **The two large benchmarks are close to the two-wide ceiling.** esift2 is at IPC 1.72 and coin at
   1.67 against a maximum of 2.0 — 86% and 84%. Both now have a front end that delivers two
   instructions on 98% of cycles, so what is left there is genuinely issue width and dependence
   chains rather than any structure that can be resized.
+
+  **SETTLED: it was issue width, and the ceiling moved twice.** Both are now past IPC 2.75 at
+  4-wide.
 - **`LSQ_ENTRIES` 64 was measured and rejected twice.** Against the narrow front end it was worth
   1.025× on coin and nothing on the other three. It was re-measured afterwards, because coin's
   dispatch stalls had risen to 2,837,999 and all of them were the load/store queue — and on the
   wide-fetch design it is worth **nothing at all**: coin 21,405,644 → 21,405,568, quickSort
   identical to the cycle. What it does is move coin's stall from the load/store queue to the
   reorder buffer, 2,838,567 → 3,095,390, for **76 cycles**.
+
+  **Rejected a third time, at 4-wide, and the third time was the most extreme.** coin's
+  `stall_only_lsq` had risen to 3,415,793 cycles — 26.6% of its run and the largest single stall
+  anywhere in the suite. Relieving it entirely moved `stall_only_iq` 195,795 → 3,593,966 and was
+  worth **ten cycles**.
 
   That is the most useful negative result in this file, because it shows a dispatch stall is not
   automatically a cost. When the machine is limited by something else, whichever queue happens to
@@ -1262,14 +1309,18 @@ is exactly what the pipelined D-cache port then relieved.
   coin's `stall_lsq` never was. The counter tells you where the queue ends, not always why.
 - **quickSort's remaining stalls have no single owner**: reorder buffer 166,542, issue queue
   120,351, free list 32,218. The issue queue binding at all is new. There is no next parameter.
-- **nqueens is limited by branch accuracy** and nothing structural: 8,548 dispatch stalls in its
-  entire run, 1.1% of cycles.
-- **nqueens is limited by branch accuracy**, at 76.3%. It is the one benchmark where a stronger
-  direction predictor (TAGE) would pay; on coin and esift2 the tournament predictor is already at
-  98% and there is nothing to win.
-- **esift2 and coin are at IPC 2.36 and 2.02** against a ceiling that is now 3.0. What is left on
-  coin is measured and specific: it accepts a single instruction on 32.3% of cycles because the
-  decode group ends at every control instruction, and `IQ_ENTRIES` binds for 1,549,018 cycles.
+
+  **SETTLED: there was no next parameter, and there did not need to be.** quickSort's stalls fell
+  from 496,807 cycles to 85,869 through the cache and the prefetcher rather than through any
+  structure resizing.
+- **nqueens is limited by branch accuracy**, at 76.3%, and by nothing structural: 8,548 dispatch
+  stalls in its entire run, 1.1% of cycles. It is the one benchmark where a stronger direction
+  predictor would pay; on coin and esift2 the tournament predictor is already at 98%.
+
+  **STILL TRUE, and it is the one item here that survived.** At 80.6% accuracy and 4-wide it has
+  2,468 cycles of dispatch stall in the whole run. `squash_refill` shows the front end recovers
+  from a redirect in ~1.14 cycles, so the entire remaining cost is wrong-path work — accuracy is
+  the only lever, and there is no structure left to resize.
 
 For reference, the in-order baseline runs coin at IPC 0.995 — 99.5% of *its* ceiling. coin was the
 benchmark this design served worst, at 1.05×; it is now **2.03× at IPC 2.02**. Essentially all of
@@ -1292,11 +1343,23 @@ for:
 Three or more instructions are ready on 13.1% of coin's cycles and 23.4% of esift2's, so **4-wide is
 not worth it** — the parallelism to feed it is not in the window.
 
-**The claim that used to sit here, that wider fetch is not worth building either, was wrong, and
-the way it was wrong is worth keeping.** It rested on `fetch_starved`, which is 0.6% on coin — but
-that counter only fires when the fetch buffer is *completely empty*. It says nothing about a buffer
-holding exactly one instruction, which turns out to be what actually happens. See
+**That conclusion was wrong too, and this is the second time this table has misled.** The numbers
+are real, but they were taken with a **64-entry reorder buffer behind a 2-wide front end**, and
+they measure the window that machine could fill rather than the parallelism in the program. At ROB
+128 with a 3-wide front end feeding it, `ready_ge3` on esift2 reads **68%**, not 23.4%, and
+`issue_3` — the machine issuing its full width — fires on 68% of its cycles. Going 4-wide is worth
+**1.280× on coin and 1.222× on esift2**, the largest single win in this file. See
+[four wide](#four-wide-which-was-supposed-to-be-a-dead-end).
+
+**The claim that used to sit here, that wider fetch is not worth building either, was wrong in the
+same way, and the way it was wrong is worth keeping.** It rested on `fetch_starved`, which is 0.6%
+on coin — but that counter only fires when the fetch buffer is *completely empty*. It says nothing
+about a buffer holding exactly one instruction, which turns out to be what actually happens. See
 [what the front end really delivers](#what-the-front-end-really-delivers).
+
+Twice now, a window-occupancy measurement has been read as a fact about the *programs* when it was
+a fact about the *machine measuring them*. An occupancy counter is only ever an upper bound set by
+whatever is upstream of it.
 
 These numbers moved a lot when the cache stopped blocking, and in the informative direction.
 Before, two memory operations were ready together on a quarter of nqueens' cycles and 26% of
