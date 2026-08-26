@@ -1,0 +1,6 @@
+# These run on Linux (nanoHUB). A CRLF shebang gives you
+# "bad interpreter: /usr/bin/env bash^M", so force LF regardless of the
+# cloning machine's core.autocrlf.
+*.sh    text eol=lf
+*.py    text eol=lf
+*.v     text eol=lf
