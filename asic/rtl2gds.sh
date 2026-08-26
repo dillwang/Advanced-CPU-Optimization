@@ -63,6 +63,12 @@ MAX_LAYER=""       # empty = the PDK default, met5 on sky130A
 CLOCK_GATE=0
 HIER_MODE=""
 CHILD_MAX_LAYER="${CHILD_MAX_LAYER:-met4}"
+# slang reads the SystemVerilog directly through LibreLane (USE_SLANG) and
+# keeps every module. sv2v lowers it here first and inlines anything with an
+# interface port. slang is both less work and a better hierarchy to cut, so it
+# is the default; sv2v stays for a LibreLane built without the plugin.
+FRONTEND="${FRONTEND:-slang}"
+SV_FILES=()
 FLOW_KIND=""       # librelane | openlane2 | openlane1
 FLOW_CMD=""
 
@@ -95,6 +101,8 @@ Options:
       --clock-gate N   gate enabled flop groups of >= N bits (default off)
       --hierarchy M    SYNTH_HIERARCHY_MODE: flatten (LibreLane's default),
                        deferred_flatten, or keep
+      --frontend F     slang (default; LibreLane reads the SystemVerilog) or
+                       sv2v (lower it to Verilog-2005 here first)
 
 Environment:
   HIER_CUTS   which modules `hier` hardens into macros before the top
@@ -122,6 +130,7 @@ while [ $# -gt 0 ]; do
 		--max-layer)   MAX_LAYER="$2"; shift 2 ;;
 		--clock-gate)  CLOCK_GATE="${2:-8}"; shift 2 ;;
 		--hierarchy)   HIER_MODE="$2"; shift 2 ;;
+		--frontend)    FRONTEND="$2"; shift 2 ;;
 		-h|--help)     usage 0 ;;
 		-*)            usage 1 ;;
 		*)             TARGETS+=("$1"); shift ;;
@@ -196,12 +205,23 @@ find_sv2v() {
 		[ -n "$c" ] && [ -x "$c" ] && { SV2V="$(cd "$(dirname "$c")" && pwd)/$(basename "$c")"; return 0; }
 	done
 	if [ "$FETCH_SV2V" = 1 ]; then
+		# The published sv2v binaries are dynamically linked against a recent
+		# glibc. nanoHUB is Rocky 8, which is glibc 2.28, and the current
+		# release wants 2.34 -- it downloads fine and then will not run. Check
+		# that it actually executes before believing in it.
 		say "fetching sv2v"
 		mkdir -p "$BUILD"
 		local url=https://github.com/zachjs/sv2v/releases/latest/download/sv2v-Linux.zip
 		curl -fsSL "$url" -o "$BUILD/sv2v.zip" || die "could not download sv2v (no network?)"
 		( cd "$BUILD" && unzip -oq sv2v.zip && find . -name sv2v -type f -exec cp {} sv2v \; )
-		chmod +x "$BUILD/sv2v" && SV2V="$BUILD/sv2v" && return 0
+		chmod +x "$BUILD/sv2v"
+		if "$BUILD/sv2v" --version >/dev/null 2>&1; then
+			SV2V="$BUILD/sv2v"
+			return 0
+		fi
+		warn "the downloaded sv2v will not run here:
+$("$BUILD/sv2v" --version 2>&1 | sed 's/^/     /' | head -4)"
+		rm -f "$BUILD/sv2v"
 	fi
 	return 1
 }
@@ -215,6 +235,21 @@ find_sv2v() {
 # the $display/$fatal assertion blocks, and it removes the behavioural OpenRAM
 # model from cache_bank.sv so that `sram` becomes the black box the macro
 # mapping in src/sram_sky130.v then binds to a real 32x256 array.
+# The authoritative file list, absolute, in compile order. Globbing
+# mips_core/*.sv misses ooo/ and branch_predictor_files/ and picks up the
+# retired predictors, so verilator_files is what decides.
+sv_files() {
+	[ -f "$RTL/verilator_files" ] || die "no $RTL/verilator_files"
+	SV_FILES=()
+	local f
+	while read -r f; do
+		[ -n "$f" ] || continue
+		[ -f "$RTL/$f" ] || die "verilator_files names $f, which is not there"
+		SV_FILES+=("$RTL/$f")
+	done < <(tr -d '' < "$RTL/verilator_files" | sed '/^[[:space:]]*$/d')
+	ok "${#SV_FILES[@]} SystemVerilog sources"
+}
+
 lower() {
 	[ -f "$RTL/verilator_files" ] || die "no $RTL/verilator_files"
 	if [ -s "$FLAT" ] && [ "$FLAT" -nt "$RTL/verilator_files" ] &&
@@ -231,10 +266,11 @@ lower() {
      If you changed the RTL, it is stale: re-run with --fetch-sv2v."
 			return 0
 		fi
-		die "sv2v not found, and no build/mips_core.v to fall back on. Either
-       ./rtl2gds.sh --fetch-sv2v ...        (needs outbound network), or
-       run asic/prepare.sh on a machine that has the CSE148 container and
-       upload the resulting build/mips_core.v here."
+		die "sv2v is not usable here, and there is no build/mips_core.v to fall
+     back on. You probably do not need it: --frontend slang (the default)
+     has LibreLane read the SystemVerilog directly and skips sv2v entirely.
+     Otherwise run asic/prepare.sh on a machine with the CSE148 container
+     and upload the resulting build/mips_core.v."
 	fi
 	# verilator_files is the authoritative list of what is in the machine.
 	# Globbing mips_core/*.sv misses ooo/ and branch_predictor_files/, and picks
@@ -258,20 +294,52 @@ lower() {
 # sv2v inlines any module with a SystemVerilog interface port into its parent,
 # so d_cache, i_cache, alu, decoder, lsq and the rest vanish into mips_core.
 # Whatever survives as a real module is exactly what can be hardened alone.
+# Everything downstream asks for the sources through these two, so the choice
+# of frontend is made once, here.
+front() {
+	case "$FRONTEND" in
+	slang) sv_files ;;
+	sv2v)  lower; SV_FILES=() ;;
+	*)     die "unknown --frontend '$FRONTEND'; try slang or sv2v" ;;
+	esac
+}
+
+# The arguments that name this design's RTL, whichever frontend is in use.
+src_args() {
+	if [ "$FRONTEND" = slang ]; then
+		local f
+		for f in "${SV_FILES[@]}"; do printf '%s
+--sv-file
+%s
+' "" "$f"; done 			| sed '/^$/d'
+		printf -- '--include-dir
+%s
+' "$RTL/mips_core"
+	else
+		printf -- '--verilog
+%s
+' "$FLAT"
+	fi
+}
+
 modules()      { sed -n 's/^module[[:space:]][[:space:]]*\([A-Za-z_][A-Za-z0-9_$]*\).*/\1/p' "$FLAT" | sort; }
 block_list()   { modules | grep -vx 'mips_core'; }
 
 do_list() {
-	lower
-	say "hardenable modules"
-	"$PY" "$HERE/scripts/gen_config.py" --probe --verilog "$FLAT"
-	cat <<'NOTE'
+	front
+	say "hardenable modules ($FRONTEND frontend)"
+	local src=()
+	while IFS= read -r line; do src+=("$line"); done < <(src_args)
+	"$PY" "$HERE/scripts/gen_config.py" --probe "${src[@]}"
+	if [ "$FRONTEND" = sv2v ]; then
+		cat <<'NOTE'
 
-    A module is listed here only if it survived sv2v as a real module. Anything
-    with a SystemVerilog interface port -- d_cache, i_cache, alu, decoder, lsq,
-    ooo_backend, stream_buffer, d_prefetcher -- was inlined into mips_core and
-    can only be hardened as part of it.
+    sv2v inlines any module with a SystemVerilog interface port into its
+    parent, so d_cache, i_cache, alu, decoder, lsq, ooo_backend, stream_buffer
+    and d_prefetcher are not here -- they went into mips_core. --frontend slang
+    keeps them, and is the default.
 NOTE
+	fi
 }
 
 # ==================================== stages 2-6: hand one module to the flow
@@ -315,9 +383,12 @@ write_config() {
 	# and bash turns errexit off for everything underneath one -- so a failure
 	# here would otherwise print its message and carry on to hand the flow a
 	# config.json that does not exist.
+	local src=()
+	while IFS= read -r line; do src+=("$line"); done < <(src_args)
+
 	rm -f "$dir/config.json"
 	if ! "$PY" "$HERE/scripts/gen_config.py" "$mod" \
-		--verilog "$FLAT" ${args[@]+"${args[@]}"} \
+		"${src[@]}" ${args[@]+"${args[@]}"} \
 		--out "$dir/config.json" \
 		--period "$PERIOD" --util "$UTIL" \
 		--pdk-root "$PDK_ROOT" --pdk "$PDK" \
@@ -561,7 +632,17 @@ do_hier() {
 	local top="${1:-mips_core}"
 	local cuts="${HIER_CUTS:-$HIER_CUTS_DEFAULT}"
 	local order
-	order="$("$PY" "$HERE/scripts/hier_order.py" --verilog "$FLAT" --top "$top" $cuts)"
+	# hier_order takes the same source arguments, minus the include path,
+	# which only the config needs.
+	local hsrc=() src=()
+	while IFS= read -r line; do src+=("$line"); done < <(src_args)
+	local i=0
+	while [ "$i" -lt "${#src[@]}" ]; do
+		if [ "${src[$i]}" = "--include-dir" ]; then i=$((i + 2)); continue; fi
+		hsrc+=("${src[$i]}")
+		i=$((i + 1))
+	done
+	order="$("$PY" "$HERE/scripts/hier_order.py" "${hsrc[@]}" --top "$top" $cuts)"
 	say "hierarchical order: $order"
 
 	local m
@@ -693,13 +774,13 @@ main() {
 		pdk-report)
 			find_pdk
 			[ -n "$PDK_ROOT" ] || die "pdk-report needs a PDK; pass -r"
-			"$PY" "$HERE/scripts/pdk_report.py" --pdk-root "$PDK_ROOT" 				--pdk "$PDK" --scl "$SCL" --util "$UTIL"
+			"$PY" "$HERE/scripts/pdk_report.py" --pdk-root "$PDK_ROOT" \n				--pdk "$PDK" --scl "$SCL" --util "$UTIL"
 			exit 0 ;;
 	esac
 
 	find_flow
 	find_pdk
-	lower
+	front
 
 	# hier is its own thing: a dependency-ordered sequence, not a set of
 	# independent designs, because each run consumes the one before it.

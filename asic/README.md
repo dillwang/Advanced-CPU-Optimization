@@ -54,14 +54,30 @@ height. Override either with `-k`/`-s` if you want to compare.
 
 ## What each stage does
 
-### 1. Lower — sv2v
+### 1. Read the SystemVerilog — Slang, or sv2v
 
-Yosys reads Verilog-2005. This core is SystemVerilog throughout: a package of
-parameters, interfaces on nearly every module boundary, structs, unpacked arrays
-of structs. So the first thing the script does is run every file named in
-`mips_cpu/verilator_files` through sv2v into one flat `build/mips_core.v`.
+This core is SystemVerilog throughout: a package of parameters, interfaces on
+nearly every module boundary, structs, unpacked arrays of structs. Yosys's own
+Verilog frontend reads none of that. There are two ways round it.
 
-Two details matter.
+**`--frontend slang` (the default).** LibreLane has a Slang-based frontend;
+setting `USE_SLANG` has it read the `.sv` files directly, with
+`VERILOG_INCLUDE_DIRS` pointing at `mips_core/` for `mips_core.svh`. Nothing is
+lowered and nothing is inlined, so **every module survives** — `d_cache`,
+`i_cache`, `lsq`, `ooo_backend`, `alu`, `decoder`, `stream_buffer`,
+`d_prefetcher` and `memory_arbiter` are all real designs you can harden, 22
+modules against sv2v's 12. That is a much better hierarchy to cut, so this is
+the default.
+
+**`--frontend sv2v`.** Lowers every file named in `mips_cpu/verilator_files` to
+one flat Verilog-2005 `build/mips_core.v` before LibreLane sees it. Use it if
+the LibreLane build has no Slang plugin. Two costs: sv2v inlines any module with
+an interface port into its parent, so the module list collapses to 12; and the
+published sv2v binaries are dynamically linked against glibc 2.34 while nanoHUB
+is Rocky 8 at glibc 2.28, so `--fetch-sv2v` downloads something that will not
+run there. `prepare.sh` builds it elsewhere and you upload the result.
+
+Two details matter for either frontend.
 
 **The file list comes from `verilator_files`, not a glob.** `mips_core/*.sv`
 misses `ooo/` and `branch_predictor_files/` entirely, and picks up the retired
