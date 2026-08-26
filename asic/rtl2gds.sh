@@ -151,7 +151,25 @@ done
 [ -n "$PY" ] || die "no working python3 on PATH"
 
 # =========================================================== stage 0: tooling
+# Where an installation might be, beyond PATH. nanoHUB installs LibreLane under
+# /apps and exports PDK_ROOT pointing into it, without necessarily putting the
+# entry point on PATH -- so the PDK it already found is the best clue about
+# where the rest of it lives.
+flow_candidates() {
+	local roots=() r
+	[ -n "$PDK_ROOT" ] && roots+=("${PDK_ROOT%/pdks}" "${PDK_ROOT%/*}")
+	[ -n "${LIBRELANE_ROOT:-}" ] && roots+=("$LIBRELANE_ROOT")
+	roots+=(/apps/share64/*/librelane/librelane-* /apps/share64/*/librelane
+	        /opt/librelane /usr/local/librelane "$HOME/LIBRELANE")
+	for r in "${roots[@]}"; do
+		[ -d "$r" ] || continue
+		printf '%s\n' "$r/bin/librelane" "$r/venv/bin/librelane" \
+		              "$r/.venv/bin/librelane" "$r/bin/openlane"
+	done
+}
+
 find_flow() {
+	local c
 	if [ -n "${LIBRELANE:-}" ];              then FLOW_KIND=librelane; FLOW_CMD="$LIBRELANE"
 	elif command -v librelane >/dev/null;    then FLOW_KIND=librelane; FLOW_CMD=librelane
 	elif $PY -c 'import librelane' 2>/dev/null; then
@@ -161,12 +179,30 @@ find_flow() {
 		FLOW_KIND=openlane2; FLOW_CMD="$PY -m openlane"
 	elif [ -n "${OPENLANE_ROOT:-}" ] && [ -f "$OPENLANE_ROOT/flow.tcl" ]; then
 		FLOW_KIND=openlane1; FLOW_CMD="$OPENLANE_ROOT/flow.tcl"
+	elif c="$(flow_candidates | while read -r p; do [ -x "$p" ] && { echo "$p"; break; }; done)" \
+	     && [ -n "$c" ]; then
+		case "$c" in
+		*openlane) FLOW_KIND=openlane2 ;;
+		*)         FLOW_KIND=librelane ;;
+		esac
+		FLOW_CMD="$c"
+		ok "found $FLOW_CMD off PATH"
 	elif [ "$DRY" = 1 ]; then
 		FLOW_KIND=librelane; FLOW_CMD=librelane
 		warn "no flow installed; --dry-run assumes LibreLane"
 	else
-		die "no LibreLane, OpenLane 2 or OpenLane 1 found. Inside the nanoHUB
-     LibreLane tool it is already on PATH; elsewhere set \$LIBRELANE."
+		printf '%slooked in:%s\n' "$c_wn" "$c_0" >&2
+		flow_candidates | sed 's/^/     /' >&2
+		die "no LibreLane, OpenLane 2 or OpenLane 1 found.
+
+     PDK_ROOT is ${PDK_ROOT:-unset}, so an install is probably nearby.
+     Find the entry point and point the script at it:
+
+       ls \$(dirname \${PDK_ROOT})/bin 2>/dev/null
+       find /apps -maxdepth 5 -name librelane -type f 2>/dev/null | head
+
+     then re-run with  LIBRELANE=/path/to/librelane ./rtl2gds.sh ...
+     On nanoHUB the tool session may also need its environment loaded first."
 	fi
 	say "flow: $FLOW_KIND ($FLOW_CMD)"
 	[ "$FLOW_KIND" = openlane1 ] && warn "OpenLane 1 is Tcl-era and upstream-dead.
@@ -778,8 +814,9 @@ main() {
 			exit 0 ;;
 	esac
 
-	find_flow
+	# PDK first: where it lives is the best clue about where the flow lives.
 	find_pdk
+	find_flow
 	front
 
 	# hier is its own thing: a dependency-ordered sequence, not a set of
