@@ -96,7 +96,7 @@ module rename_rob (
 	output logic fb_valid,
 	output logic [`ADDR_WIDTH - 1 : 0] fb_pc,
 	output logic [BP_IDX_W - 1 : 0] fb_index,
-	output logic [BP_HISTORY - 1 : 0] fb_hist,
+	output logic [BP_SEQ_W - 1 : 0] fb_seq,
 	output logic fb_weak,
 	output mips_core_pkg::BranchOutcome fb_perc,
 	output mips_core_pkg::BranchOutcome fb_gshare,
@@ -104,7 +104,9 @@ module rename_rob (
 
 	// ---- speculative history repair on a misprediction ----
 	output logic rec_valid,
-	output logic [BP_HISTORY - 1 : 0] rec_hist,
+	output logic [BP_SEQ_W - 1 : 0] rec_seq,
+	output logic [`ADDR_WIDTH - 1 : 0] rec_pc,
+	output logic [`ADDR_WIDTH - 1 : 0] rec_target,
 	output logic rec_shift,
 	output mips_core_pkg::BranchOutcome rec_outcome,
 
@@ -137,7 +139,7 @@ module rename_rob (
 		mips_core_pkg::BranchOutcome prediction;
 		mips_core_pkg::BranchOutcome outcome;
 		logic [BP_IDX_W - 1 : 0] bp_index;
-		logic [BP_HISTORY - 1 : 0] bp_hist;
+		logic [BP_SEQ_W - 1 : 0] bp_seq;
 		logic bp_weak;
 		mips_core_pkg::BranchOutcome bp_perc;
 		mips_core_pkg::BranchOutcome bp_gshare;
@@ -372,7 +374,7 @@ module rename_rob (
 		fb_valid = 1'b0;
 		fb_pc = '0;
 		fb_index = '0;
-		fb_hist = '0;
+		fb_seq = '0;
 		fb_weak = 1'b0;
 		fb_perc = NOT_TAKEN;
 		fb_gshare = NOT_TAKEN;
@@ -390,7 +392,7 @@ module rename_rob (
 				fb_valid = 1'b1;
 				fb_pc = rob[commit_idx[k]].pc;
 				fb_index = rob[commit_idx[k]].bp_index;
-				fb_hist = rob[commit_idx[k]].bp_hist;
+				fb_seq = rob[commit_idx[k]].bp_seq;
 				fb_weak = rob[commit_idx[k]].bp_weak;
 				fb_perc = rob[commit_idx[k]].bp_perc;
 				fb_gshare = rob[commit_idx[k]].bp_gshare;
@@ -406,7 +408,11 @@ module rename_rob (
 	// comes from the writeback port because the reorder buffer entry's copy is
 	// only written on this same clock edge.
 	assign rec_valid = red_hit;
-	assign rec_hist = rob[red_idx].bp_hist;
+	assign rec_seq = rob[red_idx].bp_seq;
+	assign rec_pc = rob[red_idx].pc;
+	// Where control actually went, which a path history cannot be rolled
+	// forward without.
+	assign rec_target = red_pc;
 	// A branch that survives its own recovery still shifts its real outcome
 	// into the history. An anchor that is itself squashed does not: it is about
 	// to be fetched and predicted again.
@@ -519,7 +525,7 @@ module rename_rob (
 				disp_uop[k].seq_target = fe_uop[k].pc + `ADDR_WIDTH'd8;
 				disp_uop[k].bp_valid = fe_uop[k].bp_valid;
 				disp_uop[k].bp_index = fe_uop[k].bp_index;
-				disp_uop[k].bp_hist = fe_uop[k].bp_hist;
+				disp_uop[k].bp_seq = fe_uop[k].bp_seq;
 				disp_uop[k].bp_weak = fe_uop[k].bp_weak;
 				disp_uop[k].bp_perc = fe_uop[k].bp_perc;
 				disp_uop[k].bp_gshare = fe_uop[k].bp_gshare;
@@ -658,7 +664,7 @@ module rename_rob (
 						rob[di].outcome <= NOT_TAKEN;
 						rob[di].bp_valid <= disp_uop[k].bp_valid;
 						rob[di].bp_index <= disp_uop[k].bp_index;
-						rob[di].bp_hist <= disp_uop[k].bp_hist;
+						rob[di].bp_seq <= disp_uop[k].bp_seq;
 						rob[di].bp_weak <= disp_uop[k].bp_weak;
 						rob[di].bp_perc <= disp_uop[k].bp_perc;
 						rob[di].bp_gshare <= disp_uop[k].bp_gshare;
@@ -768,6 +774,11 @@ module rename_rob (
 					// The reference stream skips nops, so this must too.
 					if (e.inst_nz)
 						pc_event(32'(e.pc));
+					else
+						// A nop occupies a dispatch slot, a reorder buffer
+						// entry and a commit slot while contributing nothing.
+						// Most of them are unfilled branch delay slots.
+						stats_event("commit_nop");
 
 					// Blocking assignment: several instructions can retire in
 					// one cycle and each has to shift the one before it.

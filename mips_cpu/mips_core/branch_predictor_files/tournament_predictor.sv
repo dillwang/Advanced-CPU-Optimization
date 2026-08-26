@@ -16,7 +16,19 @@
  *
  * The global history register is speculative: it advances at predict time so
  * that closely spaced branches see each other, and is rewound on a
- * misprediction from the history the offending branch carried.
+ * misprediction. What a branch carries for that rewind is not the history
+ * itself but the sequence number of its prediction. The register here is longer
+ * than the history the predictor uses -- it keeps every bit that has fallen out
+ * of the live window in the last BP_ROLL predictions -- so recovering to a
+ * branch is a right shift by the number of predictions made since, and the bits
+ * that come back are the real ones rather than a saved copy.
+ *
+ * That matters for cost. A copy of the history in every reorder buffer entry is
+ * BP_HISTORY * ROB_ENTRIES bits and grows with both, which is what made a long
+ * history look unaffordable. This is one register plus BP_SEQ_W bits per entry,
+ * and only the register grows when the history does. Training reconstructs the
+ * predicting history the same way, so it still trains on exactly the state that
+ * made the prediction.
  */
 `include "mips_core.svh"
 
@@ -27,9 +39,12 @@ module tournament_predictor (
 	// ---- prediction, made in decode ----
 	input  logic i_req_valid,
 	input  logic [`ADDR_WIDTH - 1 : 0] i_req_pc,
+	// Only the path history predictor uses these; a direction history needs
+	// neither the target nor the corrected pc in order to recover.
+	input  logic [`ADDR_WIDTH - 1 : 0] i_req_target,
 	output mips_core_pkg::BranchOutcome o_req_prediction,
 	output logic [BP_IDX_W - 1 : 0] o_req_index,
-	output logic [BP_HISTORY - 1 : 0] o_req_hist,
+	output logic [BP_SEQ_W - 1 : 0] o_req_seq,
 	output logic o_req_weak,
 	output mips_core_pkg::BranchOutcome o_req_perc,
 	output mips_core_pkg::BranchOutcome o_req_gshare,
@@ -38,7 +53,7 @@ module tournament_predictor (
 	input  logic i_fb_valid,
 	input  logic [`ADDR_WIDTH - 1 : 0] i_fb_pc,
 	input  logic [BP_IDX_W - 1 : 0] i_fb_index,
-	input  logic [BP_HISTORY - 1 : 0] i_fb_hist,
+	input  logic [BP_SEQ_W - 1 : 0] i_fb_seq,
 	input  logic i_fb_weak,
 	input  mips_core_pkg::BranchOutcome i_fb_perc,
 	input  mips_core_pkg::BranchOutcome i_fb_gshare,
@@ -46,7 +61,9 @@ module tournament_predictor (
 
 	// ---- speculative history repair on a misprediction ----
 	input  logic i_rec_valid,
-	input  logic [BP_HISTORY - 1 : 0] i_rec_hist,
+	input  logic [BP_SEQ_W - 1 : 0] i_rec_seq,
+	input  logic [`ADDR_WIDTH - 1 : 0] i_rec_pc,
+	input  logic [`ADDR_WIDTH - 1 : 0] i_rec_target,
 	input  logic i_rec_shift,
 	input  mips_core_pkg::BranchOutcome i_rec_outcome
 );
@@ -63,7 +80,30 @@ module tournament_predictor (
 	// is weak even if the direction happened to come out right.
 	localparam int THRESHOLD = (193 * BP_HISTORY) / 100 + 14;
 
+	// The live global history, plus every bit that has fallen out of it in the
+	// last BP_ROLL predictions. Nothing is discarded until it is far enough back
+	// that no recovery could reach it, which is what lets a rollback be an exact
+	// right shift rather than a saved copy.
+	localparam int HW = BP_HISTORY + BP_ROLL;
+
+	logic [HW - 1 : 0] hist_long;
+	logic [BP_SEQ_W - 1 : 0] pred_seq;
+
+	// The history as of a given prediction: undo the shifts made since.
+	function automatic logic [HW - 1 : 0] roll_back (
+		input logic [HW - 1 : 0] h,
+		input logic [BP_SEQ_W - 1 : 0] now,
+		input logic [BP_SEQ_W - 1 : 0] was);
+		return h >> (now - was);
+	endfunction
+
 	logic [BP_HISTORY - 1 : 0] ghr;
+	logic [BP_HISTORY - 1 : 0] fb_hist;
+
+	assign ghr = hist_long[BP_HISTORY - 1 : 0];
+	// Training recomputes the history the branch predicted with, from the same
+	// register, so it uses exactly the state that produced the prediction.
+	assign fb_hist = BP_HISTORY'(roll_back(hist_long, pred_seq, i_fb_seq));
 
 	logic signed [WEIGHT_BITS - 1 : 0] weights [BP_TABLES][WEIGHTS];
 	logic [1:0] gshare_ctr [BP_TABLES];
@@ -123,7 +163,7 @@ module tournament_predictor (
 	assign o_req_prediction = chooser[c_idx][1] ? o_req_gshare : o_req_perc;
 
 	assign o_req_index = p_idx;
-	assign o_req_hist = ghr;
+	assign o_req_seq = pred_seq;
 	assign o_req_weak = (perc_sum >= 0)
 		? (perc_sum <= THRESHOLD)
 		: (-perc_sum <= THRESHOLD);
@@ -139,14 +179,15 @@ module tournament_predictor (
 	endfunction
 
 	logic [BP_IDX_W - 1 : 0] fb_g_idx, fb_c_idx;
-	assign fb_g_idx = gshare_index(i_fb_pc, i_fb_hist);
+	assign fb_g_idx = gshare_index(i_fb_pc, fb_hist);
 	assign fb_c_idx = chooser_index(i_fb_pc);
 
 	always_ff @(posedge clk)
 	begin
 		if (~rst_n)
 		begin
-			ghr <= '0;
+			hist_long <= '0;
+			pred_seq <= '0;
 			// Blocking assignment for the table clear: these are large arrays
 			// and a delayed assignment inside a loop is not supported. Nothing
 			// else writes them on this edge, so the two forms are equivalent
@@ -163,7 +204,10 @@ module tournament_predictor (
 		begin
 			// ---- speculative history ----
 			if (i_req_valid)
-				ghr <= {ghr[BP_HISTORY - 2 : 0], (o_req_prediction == TAKEN)};
+			begin
+				hist_long <= {hist_long[HW - 2 : 0], (o_req_prediction == TAKEN)};
+				pred_seq <= pred_seq + 1'b1;
+			end
 
 			// A misprediction wins over a prediction made the same cycle: the
 			// front end is being redirected, so that prediction is discarded.
@@ -172,9 +216,22 @@ module tournament_predictor (
 			// just puts back the history that was live when it decoded --
 			// shifting there would inject a phantom branch.
 			if (i_rec_valid)
-				ghr <= i_rec_shift
-					? {i_rec_hist[BP_HISTORY - 2 : 0], (i_rec_outcome == TAKEN)}
-					: i_rec_hist;
+			begin
+				automatic logic [HW - 1 : 0] rolled =
+					roll_back(hist_long, pred_seq, i_rec_seq);
+				hist_long <= i_rec_shift
+					? {rolled[HW - 2 : 0], (i_rec_outcome == TAKEN)}
+					: rolled;
+				pred_seq <= i_rec_shift ? (i_rec_seq + 1'b1) : i_rec_seq;
+			`ifdef SIMULATION
+				// The rollback window has to cover every prediction that can be
+				// in flight. If this ever fires the history is being restored
+				// from bits that were already shifted away.
+				if ((pred_seq - i_rec_seq) > BP_SEQ_W'(BP_ROLL - BP_HISTORY))
+					$fatal(1, "bp: rollback of %0d exceeds the history window",
+						pred_seq - i_rec_seq);
+			`endif
+			end
 
 			// ---- training ----
 			if (i_fb_valid)
@@ -188,7 +245,7 @@ module tournament_predictor (
 				begin
 					for (int i = 0; i < WEIGHTS; i++)
 					begin
-						automatic logic hbit = (i == 0) ? 1'b1 : i_fb_hist[i - 1];
+						automatic logic hbit = (i == 0) ? 1'b1 : fb_hist[i - 1];
 						automatic logic signed [31:0] delta =
 							((i_fb_outcome == TAKEN) == hbit) ? 32'sd1 : -32'sd1;
 						weights[i_fb_index][i] <=

@@ -85,7 +85,7 @@ module mips_core (
 	logic [`ADDR_WIDTH - 1 : 0] bp_req_pc;
 	mips_core_pkg::BranchOutcome bp_prediction;
 	logic [BP_IDX_W - 1 : 0] bp_index;
-	logic [BP_HISTORY - 1 : 0] bp_hist;
+	logic [BP_SEQ_W - 1 : 0] bp_seq;
 	logic bp_weak;
 	mips_core_pkg::BranchOutcome bp_perc;
 	mips_core_pkg::BranchOutcome bp_gshare;
@@ -93,13 +93,16 @@ module mips_core (
 	logic fb_valid;
 	logic [`ADDR_WIDTH - 1 : 0] fb_pc;
 	logic [BP_IDX_W - 1 : 0] fb_index;
-	logic [BP_HISTORY - 1 : 0] fb_hist;
+	logic [BP_SEQ_W - 1 : 0] fb_seq;
 	logic fb_weak;
 	mips_core_pkg::BranchOutcome fb_perc;
 	mips_core_pkg::BranchOutcome fb_gshare;
 	mips_core_pkg::BranchOutcome fb_outcome;
 	logic rec_valid;
-	logic [BP_HISTORY - 1 : 0] rec_hist;
+	logic [BP_SEQ_W - 1 : 0] rec_seq;
+	logic [`ADDR_WIDTH - 1 : 0] rec_pc;
+	logic [`ADDR_WIDTH - 1 : 0] rec_target;
+	logic [`ADDR_WIDTH - 1 : 0] bp_req_target;
 	logic rec_shift;
 	mips_core_pkg::BranchOutcome rec_outcome;
 
@@ -139,8 +142,8 @@ module mips_core (
 
 		.ex_redirect_valid, .ex_redirect_pc,
 
-		.bp_req_valid, .bp_req_pc,
-		.bp_prediction, .bp_index, .bp_hist, .bp_weak,
+		.bp_req_valid, .bp_req_pc, .bp_req_target,
+		.bp_prediction, .bp_index, .bp_seq, .bp_weak,
 		.bp_perc, .bp_gshare
 	);
 
@@ -187,9 +190,10 @@ module mips_core (
 
 		.i_req_valid      (bp_req_valid),
 		.i_req_pc         (bp_req_pc),
+		.i_req_target     (bp_req_target),
 		.o_req_prediction (bp_prediction),
 		.o_req_index      (bp_index),
-		.o_req_hist       (bp_hist),
+		.o_req_seq        (bp_seq),
 		.o_req_weak       (bp_weak),
 		.o_req_perc       (bp_perc),
 		.o_req_gshare     (bp_gshare),
@@ -197,14 +201,16 @@ module mips_core (
 		.i_fb_valid   (fb_valid),
 		.i_fb_pc      (fb_pc),
 		.i_fb_index   (fb_index),
-		.i_fb_hist    (fb_hist),
+		.i_fb_seq     (fb_seq),
 		.i_fb_weak    (fb_weak),
 		.i_fb_perc    (fb_perc),
 		.i_fb_gshare  (fb_gshare),
 		.i_fb_outcome (fb_outcome),
 
 		.i_rec_valid   (rec_valid),
-		.i_rec_hist    (rec_hist),
+		.i_rec_seq     (rec_seq),
+		.i_rec_pc      (rec_pc),
+		.i_rec_target  (rec_target),
 		.i_rec_shift   (rec_shift),
 		.i_rec_outcome (rec_outcome)
 	);
@@ -218,9 +224,9 @@ module mips_core (
 		.fe_uop, .fe_stall,
 		.ex_redirect_valid, .ex_redirect_pc,
 
-		.fb_valid, .fb_pc, .fb_index, .fb_hist, .fb_weak,
+		.fb_valid, .fb_pc, .fb_index, .fb_seq, .fb_weak,
 		.fb_perc, .fb_gshare, .fb_outcome,
-		.rec_valid, .rec_hist, .rec_shift, .rec_outcome,
+		.rec_valid, .rec_seq, .rec_pc, .rec_target, .rec_shift, .rec_outcome,
 
 		.dc_in  (mem_d_cache_input),
 		.dc_out (mem_d_cache_output),

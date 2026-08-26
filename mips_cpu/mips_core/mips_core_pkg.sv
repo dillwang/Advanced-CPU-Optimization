@@ -135,9 +135,48 @@ parameter int NUM_WB       = ISSUE_WIDTH + 1;
 // Branch predictor geometry. These live here rather than inside the predictor
 // because a branch carries its predictor state with it through the reorder
 // buffer, so the pipeline structs have to be able to name their widths.
-parameter int BP_HISTORY   = 16;
-parameter int BP_TABLES    = 1024;
-parameter int BP_IDX_W     = 10;	// $clog2(BP_TABLES)
+parameter int BP_HISTORY   = 30;
+// Branches do not carry a copy of the global history. They carry the sequence
+// number of the prediction that produced them, and the predictor keeps one long
+// shift register holding the live history plus every bit that has fallen out of
+// it recently. Recovering to a branch is then a right shift by the number of
+// predictions made since -- which the sequence numbers give directly -- and the
+// bits that come back are the real ones, because they were never discarded.
+//
+// This is what makes a long history affordable. A copy per reorder buffer entry
+// costs BP_HISTORY * ROB_ENTRIES bits and grows with both; this costs one
+// register of BP_HISTORY + BP_ROLL bits plus BP_SEQ_W bits per entry, and only
+// the single register grows when the history does.
+parameter int BP_SEQ_W     = 8;
+// How far back a recovery can reach. Must exceed the most predictions that can
+// ever be in flight at once: every branch in the fetch buffer plus every branch
+// in the reorder buffer.
+parameter int BP_ROLL      = 256;
+
+// Textbook TAGE, for comparison against the tournament predictor. Five tagged
+// tables over a bimodal base, sized to the same budget:
+//   8 * 4096 * (3 ctr + 10 tag + 2 useful) + 4096 * 2 = 499,712 bits, 95.3% of
+//   the 64 KB all three predictors are now sized to.
+parameter int TAGE_TABLES  = 8;
+parameter int TAGE_IDX_W   = 12;
+parameter int TAGE_TAG_W   = 10;
+
+// Apple Firestorm shaped TAGE (arXiv 2411.13900). Six tables, four way set
+// associative, indexed on two PATH history registers rather than one direction
+// history: PHRT folds target addresses, PHRB folds branch addresses. Sized to
+// stay inside the same budget rather than to match Firestorm's 44K entries:
+//   6 * 1024 sets * 4 ways * (3 ctr + 13 tag + 2 useful + 1 valid) = 466,944
+//   bimodal base 4096 * 2                                =   8,192
+//   path history checkpoints 256 * (100 + 28)            =  32,768
+//                                            total = 507,904 bits, 96.9% of 64 KB
+parameter int M1_TABLES    = 6;
+parameter int M1_SET_W     = 10;	// 1024 sets per table
+parameter int M1_WAYS      = 4;
+parameter int M1_TAG_W     = 13;
+parameter int M1_PHRT_W    = 100;	// path history from target addresses
+parameter int M1_PHRB_W    = 28;	// path history from branch addresses
+parameter int BP_TABLES    = 2048;
+parameter int BP_IDX_W     = 11;	// $clog2(BP_TABLES)
 
 // Branch target buffer geometry. The BTB is what lets a prediction be made in
 // fetch: it answers "is the instruction at this pc a branch, and where does it
@@ -220,7 +259,7 @@ typedef struct packed {
 	// branch up and there is no predictor state to train or history to rewind.
 	logic bp_valid;
 	logic [BP_IDX_W - 1 : 0] bp_index;
-	logic [BP_HISTORY - 1 : 0] bp_hist;
+	logic [BP_SEQ_W - 1 : 0] bp_seq;
 	logic bp_weak;
 	BranchOutcome bp_perc;		// what the perceptron alone said
 	BranchOutcome bp_gshare;	// what gshare alone said
@@ -258,7 +297,7 @@ typedef struct packed {
 	logic [25:0] seq_target;		// pc + 8, the address after the delay slot
 	logic bp_valid;					// predictor state below is real
 	logic [BP_IDX_W - 1 : 0] bp_index;
-	logic [BP_HISTORY - 1 : 0] bp_hist;
+	logic [BP_SEQ_W - 1 : 0] bp_seq;
 	logic bp_weak;
 	BranchOutcome bp_perc;
 	BranchOutcome bp_gshare;

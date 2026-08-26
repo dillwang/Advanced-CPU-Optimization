@@ -86,9 +86,12 @@ module frontend (
 	// ---- branch predictor ----
 	output logic bp_req_valid,
 	output logic [`ADDR_WIDTH - 1 : 0] bp_req_pc,
+	// Where fetch goes after this branch. A path history predictor folds this
+	// in; a direction history one ignores it.
+	output logic [`ADDR_WIDTH - 1 : 0] bp_req_target,
 	input  mips_core_pkg::BranchOutcome bp_prediction,
 	input  logic [BP_IDX_W - 1 : 0] bp_index,
-	input  logic [BP_HISTORY - 1 : 0] bp_hist,
+	input  logic [BP_SEQ_W - 1 : 0] bp_seq,
 	input  logic bp_weak,
 	input  mips_core_pkg::BranchOutcome bp_perc,
 	input  mips_core_pkg::BranchOutcome bp_gshare
@@ -114,7 +117,7 @@ module frontend (
 		logic bp_valid;					// the direction predictor was consulted
 		logic bp_taken;
 		logic [BP_IDX_W - 1 : 0] bp_index;
-		logic [BP_HISTORY - 1 : 0] bp_hist;
+		logic [BP_SEQ_W - 1 : 0] bp_seq;
 		logic bp_weak;
 		mips_core_pkg::BranchOutcome bp_perc;
 		mips_core_pkg::BranchOutcome bp_gshare;
@@ -265,6 +268,7 @@ module frontend (
 	assign branch_pushed = hit_found && (push_n > hit_slot);
 	assign bp_req_valid = branch_pushed && !hit_uncond;
 	assign bp_req_pc = hit_pc;
+	assign bp_req_target = fe_taken ? hit_target : (hit_pc + `ADDR_WIDTH'd8);
 
 	logic fe_taken;
 	assign fe_taken = branch_pushed && (hit_uncond || (bp_prediction == TAKEN));
@@ -310,7 +314,7 @@ module frontend (
 			push_pred[j] = '0;
 			push_pred[j].bp_perc = NOT_TAKEN;
 			push_pred[j].bp_gshare = NOT_TAKEN;
-			push_pred[j].bp_hist = bp_hist;
+			push_pred[j].bp_seq = bp_seq;
 
 			if (hit_found && (FCNT_W'(j) == hit_slot))
 			begin
@@ -397,7 +401,7 @@ module frontend (
 			                                   : dec_out[g].branch_target;
 			assign dec_raw[g].bp_valid       = slot_pred[g].bp_valid;
 			assign dec_raw[g].bp_index       = slot_pred[g].bp_index;
-			assign dec_raw[g].bp_hist        = slot_pred[g].bp_hist;
+			assign dec_raw[g].bp_seq         = slot_pred[g].bp_seq;
 			assign dec_raw[g].bp_weak        = slot_pred[g].bp_weak;
 			assign dec_raw[g].bp_perc        = slot_pred[g].bp_perc;
 			assign dec_raw[g].bp_gshare      = slot_pred[g].bp_gshare;

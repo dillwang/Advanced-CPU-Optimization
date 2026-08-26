@@ -32,13 +32,15 @@ module ooo_backend (
 	output logic fb_valid,
 	output logic [`ADDR_WIDTH - 1 : 0] fb_pc,
 	output logic [BP_IDX_W - 1 : 0] fb_index,
-	output logic [BP_HISTORY - 1 : 0] fb_hist,
+	output logic [BP_SEQ_W - 1 : 0] fb_seq,
 	output logic fb_weak,
 	output mips_core_pkg::BranchOutcome fb_perc,
 	output mips_core_pkg::BranchOutcome fb_gshare,
 	output mips_core_pkg::BranchOutcome fb_outcome,
 	output logic rec_valid,
-	output logic [BP_HISTORY - 1 : 0] rec_hist,
+	output logic [BP_SEQ_W - 1 : 0] rec_seq,
+	output logic [`ADDR_WIDTH - 1 : 0] rec_pc,
+	output logic [`ADDR_WIDTH - 1 : 0] rec_target,
 	output logic rec_shift,
 	output mips_core_pkg::BranchOutcome rec_outcome,
 
@@ -119,9 +121,9 @@ module ooo_backend (
 		.commit_en_o      (commit_en),
 		.commit_rob_idx_o (commit_rob_idx),
 		.commit_is_mem_o  (commit_is_mem),
-		.fb_valid, .fb_pc, .fb_index, .fb_hist, .fb_weak,
+		.fb_valid, .fb_pc, .fb_index, .fb_seq, .fb_weak,
 		.fb_perc, .fb_gshare, .fb_outcome,
-		.rec_valid, .rec_hist, .rec_shift, .rec_outcome,
+		.rec_valid, .rec_seq, .rec_pc, .rec_target, .rec_shift, .rec_outcome,
 		.done
 	);
 
