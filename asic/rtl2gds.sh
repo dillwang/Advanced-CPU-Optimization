@@ -158,10 +158,19 @@ done
 # Roots that might hold an install, nearest first. PDK_ROOT is the strongest
 # clue: nanoHUB exports it pointing inside the very tree the flow lives in.
 flow_roots() {
-	local roots=()
+	local roots=() d
 	[ -n "$PDK_ROOT" ] && roots+=("${PDK_ROOT%/pdks}")
 	[ -n "${LIBRELANE_ROOT:-}" ] && roots+=("$LIBRELANE_ROOT")
-	roots+=(/apps/share64/*/librelane/librelane-* /apps/share64/*/librelane
+	# Anything already on PATH whose own path mentions the tool. nanoHUB puts
+	# /apps/librelane/r8/bin at the front of PATH, which says exactly where the
+	# install is even when the entry point is not called `librelane`.
+	while IFS= read -r d; do
+		case "$d" in
+		*librelane*|*openlane*|*LibreLane*) roots+=("$d" "${d%/bin}") ;;
+		esac
+	done < <(printf '%s\n' "${PATH//:/$'\n'}")
+	roots+=(/apps/librelane/*/bin /apps/librelane/* /apps/librelane
+	        /apps/share64/*/librelane/librelane-* /apps/share64/*/librelane
 	        /opt/librelane /usr/local/librelane "$HOME/LIBRELANE" "$HOME/OPENROAD")
 	printf '%s\n' "${roots[@]}" | awk 'NF && !seen[$0]++'
 }
@@ -173,8 +182,11 @@ flow_candidates() {
 	local r
 	while read -r r; do
 		[ -d "$r" ] || continue
+		# Not just the exact names: a nanoHUB install may wrap it as
+		# librelane.sh, librelane-3.0.4, or a launcher with a version suffix.
 		find "$r" -maxdepth 4 -type f -perm -u+x \
-			\( -name librelane -o -name openlane \) 2>/dev/null
+			\( -name 'librelane*' -o -name 'openlane*' \) 2>/dev/null \
+			| grep -vE '\.(py|pyc|json|yaml|yml|md|txt|log|nix)$'
 	done < <(flow_roots)
 }
 
@@ -228,10 +240,15 @@ find_flow() {
        ls ${PDK_ROOT%/pdks}
        find ${PDK_ROOT%/pdks} -maxdepth 4 -name 'librelane*' 2>/dev/null | head -30
 
-     nanoHUB tool sessions also load their environment through 'use'. If the
-     shell was started outside the tool, try:
+     PATH already carries a librelane directory, so look there first:
 
-       use -e -r librelane-3.0.4
+       ls $(printf '%s\n' "${PATH//:/$'\n'}" | grep -i 'librelane\|openlane' | head -1)
+
+     nanoHUB also runs tools through 'submit' rather than directly -- a .submit
+     file in a directory is the trace of that. If that is how it works here,
+     the whole invocation goes in \$LIBRELANE, which is expanded as a command:
+
+       LIBRELANE='submit -v librelane-3.0.4 librelane' ./rtl2gds.sh ...
 
      Once you know the entry point:  LIBRELANE='...' ./rtl2gds.sh ..."
 	fi
