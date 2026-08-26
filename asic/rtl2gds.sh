@@ -155,17 +155,41 @@ done
 # /apps and exports PDK_ROOT pointing into it, without necessarily putting the
 # entry point on PATH -- so the PDK it already found is the best clue about
 # where the rest of it lives.
-flow_candidates() {
-	local roots=() r
-	[ -n "$PDK_ROOT" ] && roots+=("${PDK_ROOT%/pdks}" "${PDK_ROOT%/*}")
+# Roots that might hold an install, nearest first. PDK_ROOT is the strongest
+# clue: nanoHUB exports it pointing inside the very tree the flow lives in.
+flow_roots() {
+	local roots=()
+	[ -n "$PDK_ROOT" ] && roots+=("${PDK_ROOT%/pdks}")
 	[ -n "${LIBRELANE_ROOT:-}" ] && roots+=("$LIBRELANE_ROOT")
 	roots+=(/apps/share64/*/librelane/librelane-* /apps/share64/*/librelane
-	        /opt/librelane /usr/local/librelane "$HOME/LIBRELANE")
-	for r in "${roots[@]}"; do
+	        /opt/librelane /usr/local/librelane "$HOME/LIBRELANE" "$HOME/OPENROAD")
+	printf '%s\n' "${roots[@]}" | awk 'NF && !seen[$0]++'
+}
+
+# Search the roots rather than guess at bin/ and venv/bin/. A Nix-built
+# LibreLane puts its entry point somewhere none of those guesses would reach,
+# and there is no reason to keep adding guesses when find will just tell us.
+flow_candidates() {
+	local r
+	while read -r r; do
 		[ -d "$r" ] || continue
-		printf '%s\n' "$r/bin/librelane" "$r/venv/bin/librelane" \
-		              "$r/.venv/bin/librelane" "$r/bin/openlane"
-	done
+		find "$r" -maxdepth 4 -type f -perm -u+x \
+			\( -name librelane -o -name openlane \) 2>/dev/null
+	done < <(flow_roots)
+}
+
+# Failing an executable, an importable package is just as good: LibreLane is a
+# Python module and `python -m librelane` is a documented way in.
+flow_python_path() {
+	local r p
+	while read -r r; do
+		[ -d "$r" ] || continue
+		for p in "$r"/lib/python*/site-packages "$r"/lib64/python*/site-packages \
+		         "$r"/venv/lib/python*/site-packages "$r"; do
+			[ -d "$p/librelane" ] && { printf '%s\n' "$p"; return 0; }
+		done
+	done < <(flow_roots)
+	return 1
 }
 
 find_flow() {
@@ -179,30 +203,37 @@ find_flow() {
 		FLOW_KIND=openlane2; FLOW_CMD="$PY -m openlane"
 	elif [ -n "${OPENLANE_ROOT:-}" ] && [ -f "$OPENLANE_ROOT/flow.tcl" ]; then
 		FLOW_KIND=openlane1; FLOW_CMD="$OPENLANE_ROOT/flow.tcl"
-	elif c="$(flow_candidates | while read -r p; do [ -x "$p" ] && { echo "$p"; break; }; done)" \
-	     && [ -n "$c" ]; then
+	elif c="$(flow_candidates | head -1)" && [ -n "$c" ]; then
 		case "$c" in
 		*openlane) FLOW_KIND=openlane2 ;;
 		*)         FLOW_KIND=librelane ;;
 		esac
 		FLOW_CMD="$c"
 		ok "found $FLOW_CMD off PATH"
+	elif c="$(flow_python_path)" && [ -n "$c" ]; then
+		FLOW_KIND=librelane
+		FLOW_CMD="env PYTHONPATH=$c${PYTHONPATH:+:$PYTHONPATH} $PY -m librelane"
+		ok "importing librelane from $c"
 	elif [ "$DRY" = 1 ]; then
 		FLOW_KIND=librelane; FLOW_CMD=librelane
 		warn "no flow installed; --dry-run assumes LibreLane"
 	else
-		printf '%slooked in:%s\n' "$c_wn" "$c_0" >&2
-		flow_candidates | sed 's/^/     /' >&2
+		printf '%ssearched these roots, no executable and no importable\n     librelane package under any of them:%s\n' "$c_wn" "$c_0" >&2
+		flow_roots | sed 's/^/     /' >&2
 		die "no LibreLane, OpenLane 2 or OpenLane 1 found.
 
-     PDK_ROOT is ${PDK_ROOT:-unset}, so an install is probably nearby.
-     Find the entry point and point the script at it:
+     PDK_ROOT is ${PDK_ROOT:-unset}, so the install is right there and only
+     its entry point is missing. Show what the tree actually looks like:
 
-       ls \$(dirname \${PDK_ROOT})/bin 2>/dev/null
-       find /apps -maxdepth 5 -name librelane -type f 2>/dev/null | head
+       ls ${PDK_ROOT%/pdks}
+       find ${PDK_ROOT%/pdks} -maxdepth 4 -name 'librelane*' 2>/dev/null | head -30
 
-     then re-run with  LIBRELANE=/path/to/librelane ./rtl2gds.sh ...
-     On nanoHUB the tool session may also need its environment loaded first."
+     nanoHUB tool sessions also load their environment through 'use'. If the
+     shell was started outside the tool, try:
+
+       use -e -r librelane-3.0.4
+
+     Once you know the entry point:  LIBRELANE='...' ./rtl2gds.sh ..."
 	fi
 	say "flow: $FLOW_KIND ($FLOW_CMD)"
 	[ "$FLOW_KIND" = openlane1 ] && warn "OpenLane 1 is Tcl-era and upstream-dead.
