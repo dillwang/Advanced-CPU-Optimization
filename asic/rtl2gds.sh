@@ -172,7 +172,38 @@ flow_roots() {
 	roots+=(/apps/librelane/*/bin /apps/librelane/* /apps/librelane
 	        /apps/share64/*/librelane/librelane-* /apps/share64/*/librelane
 	        /opt/librelane /usr/local/librelane "$HOME/LIBRELANE" "$HOME/OPENROAD")
-	printf '%s\n' "${roots[@]}" | awk 'NF && !seen[$0]++'
+	# Prefer roots carrying the same version string as the PDK. There are six
+	# LibreLane versions on this machine and picking one at random to drive
+	# another one's PDK is how you get a failure that blames the wrong thing.
+	local ver=""
+	case "$PDK_ROOT" in
+	*librelane-*) ver="${PDK_ROOT#*librelane-}"; ver="librelane-${ver%%/*}" ;;
+	esac
+	printf '%s\n' "${roots[@]}" | awk -v v="$ver" '
+		NF && !seen[$0]++ { if (v != "" && index($0, v)) first[++f] = $0; else rest[++r] = $0 }
+		END { for (i = 1; i <= f; i++) print first[i]
+		      for (i = 1; i <= r; i++) print rest[i] }'
+}
+
+# LibreLane needs Python 3.8 or newer -- librelane/__version__.py imports
+# importlib.metadata, which does not exist before then. nanoHUB's /usr/bin
+# python3 is 3.6, so the interpreter that runs this script is not necessarily
+# one that can run the flow. Look for a better one, preferring whatever ships
+# beside the install.
+flow_python() {
+	local r c v
+	{
+		while read -r r; do
+			printf '%s\n' "$r/bin/python3" "$r/venv/bin/python3" \
+			              "$r/.venv/bin/python3"
+		done < <(flow_roots)
+		printf '%s\n' python3.13 python3.12 python3.11 python3.10 python3.9 \
+		              python3.8 python3
+	} | while read -r c; do
+		command -v "$c" >/dev/null 2>&1 || [ -x "$c" ] || continue
+		v="$("$c" -c 'import sys; print(sys.version_info[0]*100+sys.version_info[1])' 2>/dev/null)" || continue
+		[ -n "$v" ] && [ "$v" -ge 308 ] && { printf '%s\n' "$c"; break; }
+	done
 }
 
 # Search the roots rather than guess at bin/ and venv/bin/. A Nix-built
@@ -247,9 +278,22 @@ find_flow() {
 		ok "found $FLOW_CMD off PATH"
 		warn_version_skew "$c"
 	elif c="$(flow_python_path)" && [ -n "$c" ]; then
+		local interp
+		interp="$(flow_python)"
+		[ -n "$interp" ] || die "found a librelane package at
+     $c
+     but no Python 3.8+ to run it with. \$(command -v python3) is
+     $($PY -c 'import sys; print(".".join(map(str, sys.version_info[:3])))'),
+     and librelane/__version__.py imports importlib.metadata, which needs 3.8.
+
+     The install almost certainly ships its own interpreter. Look for it:
+       ls /apps/librelane/*/bin
+       ls ${PDK_ROOT%/pdks}/bin
+     then re-run with  LIBRELANE='/path/to/python3 -m librelane' ./rtl2gds.sh ..."
 		FLOW_KIND=librelane
-		FLOW_CMD="env PYTHONPATH=$c${PYTHONPATH:+:$PYTHONPATH} $PY -m librelane"
+		FLOW_CMD="env PYTHONPATH=$c${PYTHONPATH:+:$PYTHONPATH} $interp -m librelane"
 		ok "importing librelane from $c"
+		ok "running it with $interp ($("$interp" -c 'import sys; print(".".join(map(str, sys.version_info[:3])))'))"
 		warn_version_skew "$c"
 	elif [ "$DRY" = 1 ]; then
 		FLOW_KIND=librelane; FLOW_CMD=librelane
