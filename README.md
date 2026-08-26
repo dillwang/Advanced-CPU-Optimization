@@ -40,16 +40,32 @@ out-of-order core instead.
  │ FETCH + PREDICT (BTB) │   │            issue queue             │   │              │
  │   ↓                   │──▶│         (32 entries, oldest-       │──▶│   COMMIT     │
  │ fetch buffer → DECODE │   │          ready-first select)       │   │  (in order,  │
- │   ↓                   │   │                 ↓                  │   │   2 wide)    │
- │ RENAME + DISPATCH     │   │   2 ALUs   +   load/store queue     │   │              │
+ │   ↓                   │   │                 ↓                  │   │   4 wide)    │
+ │ RENAME + DISPATCH     │   │   4 ALUs   +   load/store queue     │   │              │
  └───────────────────────┘   │                 ↓                  │   └──────────────┘
             │                │            writeback               │          ▲
-            └────────────────┴──── reorder buffer (64 entries) ────┴──────────┘
+            └────────────────┴─── reorder buffer (128 entries) ────┴──────────┘
 ```
 
-The front end, rename and commit are all in program order and 2 instructions wide. Everything
-between dispatch and writeback runs out of order, bounded by the issue queue and the reorder
-buffer.
+The front end, rename and commit are all in program order and `FE_WIDTH` instructions wide.
+Everything between dispatch and writeback runs out of order, bounded by the issue queue and the
+reorder buffer.
+
+Current sizing, all in `mips_core_pkg.sv` unless noted:
+
+| | |
+| --- | --- |
+| fetch / decode / rename / dispatch / commit | `FETCH_WIDTH` **8** words in, `FE_WIDTH` **4** instructions out |
+| issue | `ISSUE_WIDTH` **4**, so 4 ALUs, 8 register-file read ports, 5 write ports |
+| window | reorder buffer **128**, issue queue **32**, load/store queue **32**, **128** physical registers |
+| branch prediction | TAGE-SC-L: 6 tagged tables x 1024 sets x 4 ways over two path histories, plus a statistical corrector (~90 KB total) |
+| target buffer | **512** entries |
+| I-cache | **8 KB**, 2-way, 8-word lines, with a next-line stream buffer |
+| D-cache | **32 KB**, 4-way, 8-word lines, non-blocking, **8** miss registers over **two** AXI read ids |
+| D-side prefetcher | 64 lines, 16 stream detectors, spatial + temporal, on its own AXI read id |
+
+The history of how each of these was arrived at — and the several that were arrived at twice
+because the first answer was wrong — is in [Results](#results).
 
 **All architectural state changes happen at commit** — the architectural register map, freeing
 physical registers, stores reaching the D-cache, and the simulation event stream. A squashed
@@ -66,14 +82,24 @@ instruction can therefore never be observed.
 | `ooo/lsq.sv` | Load/store queue, disambiguation, store-to-load forwarding, memory order violation detection, D-cache port |
 | `ooo/prf.sv` | Unified physical register file |
 | `ooo/ooo_backend.sv` | Back-end glue and the execution units |
-| `branch_predictor_files/tournament_predictor.sv` | Perceptron + gshare + chooser |
-| `stream_buffer.sv` | Next-line prefetcher |
-| `d_cache.sv` | 4-way write-back data cache, non-blocking: miss status holding registers and a decoupled writeback queue |
-| `i_cache.sv`, `memory_arbiter.sv` | Unchanged from the baseline, except that the I-cache now returns two contiguous words per fetch |
+| `branch_predictor_files/tage_m1.sv` | **The predictor in use**: TAGE shaped after the Apple Firestorm design, on two path histories |
+| `branch_predictor_files/statistical_corrector.sv` | The SC of TAGE-SC-L: bias, path and local-history counter banks that can override the tagged prediction |
+| `branch_predictor_files/tournament_predictor.sv` | Perceptron + gshare + chooser. Not wired in; kept as the baseline the others are measured against |
+| `branch_predictor_files/tage_predictor.sv` | Textbook TAGE on a direction history, for the same comparison |
+| `stream_buffer.sv` | Next-line instruction prefetcher |
+| `d_prefetcher.sv` | Data-side prefetcher: spatial stream detection and a temporal correlation table, with its own line storage and AXI id |
+| `d_cache.sv` | 4-way write-back data cache, non-blocking: miss status holding registers, a decoupled writeback queue, and two AXI read ids |
+| `i_cache.sv`, `memory_arbiter.sv` | Close to the baseline. The I-cache returns a whole 8-word line per fetch; the arbiter now carries five read masters |
 
 ---
 
 # Branch Prediction
+
+> **The predictor wired in is now TAGE-SC-L** (`tage_m1.sv` + `statistical_corrector.sv`), described
+> in [Statistical Correction](#statistical-correction). The tournament predictor below is still in
+> the tree and is the baseline all three of the others were measured against, so this section
+> stands as written — it is also where the sequence-number history recovery that all of them share
+> is explained.
 
 A **perceptron predictor** ([Jimenez and Lin, HPCA 2001](https://www.cs.utexas.edu/~lin/papers/hpca01.pdf))
 and a **gshare** predictor run in parallel, with a per-PC chooser deciding which to believe.
@@ -175,15 +201,14 @@ needs no snapshot storage at all.
 
 # Out of Order Execution
 
-- **64-entry reorder buffer**, **32-entry issue queue**, **16-entry load/store queue**
-- 2-wide rename/dispatch/commit, 2 issue ports, 2 ALUs, 1 memory port
+- **128-entry reorder buffer**, **32-entry issue queue**, **32-entry load/store queue**
+- 4-wide rename/dispatch/commit, 4 issue ports, 4 ALUs, 1 memory port
 - Single-cycle execute with no bypass network
 
-> These are the sizes this section was written against, and the rest of it describes the machine at
-> that width. It has since been widened twice and the structures resized against measured stall
-> attribution; the current configuration is a **128-entry reorder buffer, 4-wide rename, dispatch,
-> commit and issue, 4 ALUs**, and on branch `tage-sc-l` a 32 KB data cache with a prefetcher beside
-> it. See [What actually bounds the window](#what-actually-bounds-the-window) and
+> **This section describes the machine as first built: 64-entry reorder buffer, 16-entry load/store
+> queue, 2-wide, 2 ALUs.** The mechanisms below are unchanged, but every size has since moved, and
+> the two widenings were the largest wins in the project. How each size was arrived at is in
+> [What actually bounds the window](#what-actually-bounds-the-window) and
 > [Going Four Wide](#going-four-wide-and-what-memory-actually-costs).
 
 **Wakeup needs no CAM.** The physical register file is written at the end of the cycle an
