@@ -185,7 +185,7 @@ module mips_core (
 		end
 	end
 
-	tournament_predictor PREDICTOR (
+	tage_m1 PREDICTOR (
 		.clk, .rst_n,
 
 		.i_req_valid      (bp_req_valid),

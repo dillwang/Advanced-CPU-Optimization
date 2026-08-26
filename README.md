@@ -433,6 +433,99 @@ words per fetch** to feed the 2-wide front end.
 
 ---
 
+# Statistical Correction
+
+The predictor on this branch is the Firestorm shaped TAGE of `tage_m1.sv` with the **SC of
+TAGE-SC-L** bolted to it (`statistical_corrector.sv`). It is the one structure here built without
+regard to the 64 KB budget the three compared predictors were held to.
+
+### Why a corrector rather than a bigger TAGE
+
+A tagged predictor answers a branch by finding the longest history that has seen this exact context
+before and replaying what happened. It fails in one specific way: when the context matches but the
+outcome is only *correlated* rather than determined, the entry commits to an answer and is
+confidently wrong. Counters were added to separate the two failure modes, and they are not close:
+
+| nqueens mispredictions | count |
+| --- | --- |
+| a tagged entry matched and was wrong | **36,535** |
+| no tagged entry matched at all | 2,198 |
+
+94% of the misses are the first kind, and no amount of extra tables or history touches them. The
+corrector answers the same branch a different way -- many weakly correlated signed counters summed,
+perceptron style, with the sign of the sum as a second opinion -- and overrides the TAGE only when
+the magnitude clears an adaptive threshold, so it stays silent on branches the TAGE already has.
+
+Three families: **bias** tables indexed by pc, then by pc with the TAGE prediction, then with its
+confidence; **path** GEHL banks folded from the same two path history registers the TAGE indexes
+with; and **local** GEHL banks over a per branch history of that branch's own recent outcomes.
+
+### What the local family is worth
+
+| | full corrector | no local history |
+| --- | --- | --- |
+| nqueens   | **587,259** / 80.58% | 606,238 / 77.75% |
+| quickSort | 2,863,656 / 87.61% | 2,860,652 / 87.65% |
+| esift2    | 3,296,264 / 98.53% | 3,295,359 / 98.54% |
+
+It is almost entirely an nqueens component -- worth 2.8 accuracy points and 1.032x there, and a
+rounding error *against* on the other two. That is the shape to expect: it is the one family with no
+equivalent in the TAGE, because TAGE indexes by global path, and a branch whose own recent outcomes
+are regular while its global context never repeats is invisible to it. nqueens is a backtracking
+search and is exactly that.
+
+### The bug that made the corrector a net loss
+
+The first version recomputed the sum at commit from the checkpointed path history. The indices
+recovered that way are correct, but the *contents* are whatever every branch since has trained into
+them, so the perceptron rule and the adaptive threshold were both learning from a number the
+machine never acted on. Measured against `tage_only_correct`, a counter recording what the TAGE
+alone would have answered:
+
+| corrector net effect | recomputed sum | sum carried from prediction |
+| --- | --- | --- |
+| nqueens   | +7,095  | +7,003 |
+| quickSort | +2,908  | +3,441 |
+| esift2    | **-83** | +549 |
+| coin      | **-16,186** | **+17,703** |
+
+It was a net *loss* on coin, the benchmark where the TAGE is right 98.8% of the time and the
+threshold most needed to learn to stay quiet. The fix is the trick the path history already uses:
+carry the sum down the pipeline in a file indexed by the sequence number the branch is already
+stamped with. That also deletes the commit-side sum entirely -- only the indices need recomputing.
+A useful check that it worked: the override counters now reconcile exactly with
+`bp_correct - tage_only_correct`, which they did not before.
+
+### Result
+
+Every predictor below is trace-verified on all four benchmarks. The first three are held to 64 KB;
+the last is ~90.6 KB, of which 29 KB is the corrector.
+
+| benchmark | tournament | TAGE | TAGE-M1 | TAGE-M1 + SC |
+| --- | --- | --- | --- | --- |
+| nqueens   |    613,396 / 76.88% |    635,432 / 73.40% |    617,156 / 76.26% | **587,259 / 80.58%** |
+| quickSort |  2,916,578 / 86.63% |  2,874,266 / 87.00% |  2,865,268 / 87.32% | **2,863,656 / 87.61%** |
+| esift2    |  3,296,052 / 98.53% |  3,306,491 / 98.42% |  3,299,695 / 98.49% |   3,296,264 / 98.53% |
+| coin      | 17,157,529 / 98.04% | 16,838,092 / 98.50% | 16,468,716 / 98.82% | **16,429,702 / 99.07%** |
+
+**1.027x geometric mean over the tournament predictor**, of which the corrector itself is 1.013x.
+
+### One allocation defect worth recording
+
+Before the corrector was built, instrumenting *where* the TAGE allocates found that 26% of nqueens'
+allocations were going into table 0 -- 100 bits of path history -- which provides **zero**
+predictions in the entire run. Half went into the two tables that between them serve 0.3% of that
+benchmark's predictions. The cause was allocating uniformly at random among every table with a
+longer history than the provider, where Seznec's TAGE allocates into the *nearest* longer table with
+a decaying skip probability. On a backtracking search a 100-bit path never repeats, so the entry is
+written and never read. Fixing it moved nqueens 617,156 -> 612,957 and dropped table 0 allocations
+9,928 -> 596.
+
+Worth recording because the accuracy only moved 0.1 points: the wasted allocations were real, and
+they were not what the gap to the perceptron was made of. The corrector was.
+
+---
+
 # Results
 
 Measured on this repository with the command in [Simulation](#simulation). The correctness bar is

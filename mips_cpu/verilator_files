@@ -8,7 +8,8 @@ mips_core/decoder.sv
 mips_core/cache_bank.sv
 mips_core/memory_arbiter.sv
 mips_core/stream_buffer.sv
-mips_core/branch_predictor_files/tournament_predictor.sv
+mips_core/branch_predictor_files/tage_m1.sv
+mips_core/branch_predictor_files/statistical_corrector.sv
 mips_core/ooo/btb.sv
 mips_core/ooo/frontend.sv
 mips_core/ooo/prf.sv

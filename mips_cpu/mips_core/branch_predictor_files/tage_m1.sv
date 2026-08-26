@@ -230,6 +230,7 @@ module tage_m1 (
 	// prediction rather than whatever is current.
 	logic [PHRT_W - 1 : 0] fb_phrt;
 	logic [PHRB_W - 1 : 0] fb_phrb;
+	logic [1:0] fb_conf;			// driven below, once the provider is known
 	assign fb_phrt = ck_phrt[i_fb_seq];
 	assign fb_phrb = ck_phrb[i_fb_seq];
 
@@ -337,11 +338,50 @@ module tage_m1 (
 
 	// A provider whose counter is still weak has just been allocated and seen
 	// this branch once; the alternate has usually been there longer.
-	assign o_req_prediction = q_prov_hit
+	mips_core_pkg::BranchOutcome q_tage;
+	logic [1:0] q_conf;
+	assign q_tage = q_prov_hit
 		? ((q_prov_weak && use_alt[3]) ? q_alt_pred : q_prov_pred)
 		: base_pred;
+	assign q_conf = !q_prov_hit ? 2'd0 : (q_prov_weak ? 2'd1 : 2'd2);
+
+	// The statistical corrector gets the last word, but only where the sum of
+	// its counters is emphatic enough to clear its own adaptive threshold.
+	mips_core_pkg::BranchOutcome sc_pred;
+	logic sc_use;
+
+	statistical_corrector SC (
+		.clk, .rst_n,
+		.i_q_valid   (i_req_valid),
+		.i_q_pc      (i_req_pc),
+		.i_q_phrt    (phrt),
+		.i_q_phrb    (phrb),
+		.i_q_tage    (q_tage),
+		.i_q_conf    (q_conf),
+		.i_q_final   (o_req_prediction),
+		.i_q_seq     (pred_seq),
+		.o_q_pred    (sc_pred),
+		.o_q_use     (sc_use),
+
+		.i_fb_valid  (i_fb_valid),
+		.i_fb_pc     (i_fb_pc),
+		.i_fb_phrt   (fb_phrt),
+		.i_fb_phrb   (fb_phrb),
+		.i_fb_tage   (i_fb_gshare),
+		.i_fb_conf   (fb_conf),
+		.i_fb_outcome(i_fb_outcome),
+		.i_fb_seq    (i_fb_seq),
+
+		.i_rec_valid (i_rec_valid)
+	);
+
+	assign o_req_prediction = sc_use ? sc_pred : q_tage;
 	assign o_req_perc = o_req_prediction;
-	assign o_req_gshare = base_pred;
+	// Spare feedback channel, repurposed to carry the TAGE's own answer back
+	// to commit. Allocation has to be driven by whether the TAGE was wrong,
+	// not by whether the corrected prediction was, or the tables stop learning
+	// on every branch the corrector rescues.
+	assign o_req_gshare = q_tage;
 	assign o_req_index = base_index(i_req_pc);
 	assign o_req_seq = pred_seq;
 	assign o_req_weak = q_prov_hit ? q_prov_weak : 1'b1;
@@ -374,11 +414,16 @@ module tage_m1 (
 
 	assign prov_right = (f_prov_pred == i_fb_outcome);
 	assign alt_right = (f_alt_pred == i_fb_outcome);
-	// What this branch was actually told, carried back from the prediction, so
-	// the allocation decision matches the prediction that was really made
-	// rather than a provider recomputed at commit.
+	// What the TAGE alone said, carried back from the prediction, so that the
+	// allocation decision matches the prediction that was really made rather
+	// than a provider recomputed at commit against tables that have since
+	// moved. i_fb_gshare is that channel; i_fb_perc carries the final answer.
 	logic pred_right;
-	assign pred_right = (i_fb_perc == i_fb_outcome);
+	assign pred_right = (i_fb_gshare == i_fb_outcome);
+
+	// Confidence as it was at prediction time, reconstructed for the corrector
+	// from the checkpointed lookup.
+	assign fb_conf = !f_prov_hit ? 2'd0 : (f_prov_weak ? 2'd1 : 2'd2);
 
 	// Allocation goes into a table with a longer history than the provider,
 	// into a way whose usefulness has decayed. Four ways means a set can hold
@@ -387,37 +432,72 @@ module tage_m1 (
 	logic [TSEL_W - 1 : 0] alloc_t;
 	logic [WSEL_W - 1 : 0] alloc_w;
 
+	// Per table, whether this set has a way worth taking and which one. An
+	// invalid way is preferred over a valid one whose usefulness has decayed,
+	// since taking the invalid one costs nothing.
+	logic t_free [NT];
+	logic [WSEL_W - 1 : 0] t_wsel [NT];
+
 	always_comb
 	begin
-		automatic int unsigned nfree = 0;
-		automatic int unsigned pick = 0;
+		for (int t = 0; t < NT; t++)
+		begin
+			t_free[t] = 1'b0;
+			t_wsel[t] = '0;
+			for (int w = WAYS - 1; w >= 0; w--)
+				if (tg_val[t][f_set[t]][w] && (tg_u[t][f_set[t]][w] == '0))
+				begin
+					t_free[t] = 1'b1;
+					t_wsel[t] = WSEL_W'(w);
+				end
+			for (int w = WAYS - 1; w >= 0; w--)
+				if (!tg_val[t][f_set[t]][w])
+				begin
+					t_free[t] = 1'b1;
+					t_wsel[t] = WSEL_W'(w);
+				end
+		end
+	end
+
+	// Allocation goes into the table with the SHORTEST history still longer
+	// than the provider's, stepping one further out at random. Table NT-1 has
+	// the shortest history, so that is a scan downwards from the provider.
+	//
+	// Picking uniformly among every longer table instead, which is what this
+	// did first, sends a quarter of nqueens' allocations into table 0 -- 100
+	// bits of path history, which on a backtracking search never repeats, so
+	// the entry is written and never read. Half the allocations went to the two
+	// tables that between them serve 0.3% of that benchmark's predictions.
+	always_comb
+	begin
+		automatic logic skip;
+		skip = lfsr[0];
 		can_alloc = 1'b0;
 		alloc_t = '0;
 		alloc_w = '0;
 
-		for (int t = 0; t < NT; t++)
-			if (!f_prov_hit || (TSEL_W'(t) < f_prov))
-				for (int w = 0; w < WAYS; w++)
-					if (!tg_val[t][f_set[t]][w] || (tg_u[t][f_set[t]][w] == '0))
-						nfree = nfree + 1;
+		for (int t = NT - 1; t >= 0; t--)
+			if (!can_alloc && (!f_prov_hit || (TSEL_W'(t) < f_prov)) && t_free[t])
+			begin
+				if (skip)
+					skip = 1'b0;
+				else
+				begin
+					can_alloc = 1'b1;
+					alloc_t = TSEL_W'(t);
+					alloc_w = t_wsel[t];
+				end
+			end
 
-		if (nfree != 0)
-		begin
-			pick = int'(lfsr) % nfree;
-			for (int t = 0; t < NT; t++)
-				if (!f_prov_hit || (TSEL_W'(t) < f_prov))
-					for (int w = 0; w < WAYS; w++)
-						if (!tg_val[t][f_set[t]][w] || (tg_u[t][f_set[t]][w] == '0))
-						begin
-							if (pick == 0)
-							begin
-								can_alloc = 1'b1;
-								alloc_t = TSEL_W'(t);
-								alloc_w = WSEL_W'(w);
-							end
-							pick = pick - 1;
-						end
-		end
+		// The skip may have stepped over the only candidate there was.
+		if (!can_alloc)
+			for (int t = NT - 1; t >= 0; t--)
+				if (!can_alloc && (!f_prov_hit || (TSEL_W'(t) < f_prov)) && t_free[t])
+				begin
+					can_alloc = 1'b1;
+					alloc_t = TSEL_W'(t);
+					alloc_w = t_wsel[t];
+				end
 	end
 
 	always_ff @(posedge clk)
@@ -593,11 +673,29 @@ module tage_m1 (
 			`ifdef SIMULATION
 				if (i_fb_perc == i_fb_outcome) stats_event("bp_correct");
 				else stats_event("bp_wrong");
-				if (i_fb_gshare == i_fb_outcome) stats_event("bp_base_correct");
+				if (i_fb_gshare == i_fb_outcome) stats_event("tage_only_correct");
 				if (f_prov_hit) stats_event("tage_provided");
 				else stats_event("tage_base_only");
 				if (!pred_right && can_alloc) stats_event("tage_alloc");
 				if (!pred_right && !can_alloc) stats_event("tage_alloc_failed");
+					// Where the misses come from: a branch with no tagged entry
+					// falls all the way back to a plain bimodal, which is the one
+					// place this design is weaker than a perceptron.
+					if (!pred_right && !f_prov_hit) stats_event("wrong_base");
+					if (!pred_right && f_prov_hit) stats_event("wrong_prov");
+					if (!pred_right && f_prov_hit && f_prov_weak) stats_event("wrong_prov_weak");
+					if (f_prov_hit && f_prov == TSEL_W'(0)) stats_event("prov_t0");
+					if (f_prov_hit && f_prov == TSEL_W'(1)) stats_event("prov_t1");
+					if (f_prov_hit && f_prov == TSEL_W'(2)) stats_event("prov_t2");
+					if (f_prov_hit && f_prov == TSEL_W'(3)) stats_event("prov_t3");
+					if (f_prov_hit && f_prov == TSEL_W'(4)) stats_event("prov_t4");
+					if (f_prov_hit && f_prov == TSEL_W'(5)) stats_event("prov_t5");
+					if (!pred_right && can_alloc && alloc_t == TSEL_W'(0)) stats_event("alc_t0");
+					if (!pred_right && can_alloc && alloc_t == TSEL_W'(1)) stats_event("alc_t1");
+					if (!pred_right && can_alloc && alloc_t == TSEL_W'(2)) stats_event("alc_t2");
+					if (!pred_right && can_alloc && alloc_t == TSEL_W'(3)) stats_event("alc_t3");
+					if (!pred_right && can_alloc && alloc_t == TSEL_W'(4)) stats_event("alc_t4");
+					if (!pred_right && can_alloc && alloc_t == TSEL_W'(5)) stats_event("alc_t5");
 			`endif
 			end
 		end

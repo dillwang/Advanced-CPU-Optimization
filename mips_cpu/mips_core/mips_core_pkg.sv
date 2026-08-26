@@ -175,6 +175,21 @@ parameter int M1_WAYS      = 4;
 parameter int M1_TAG_W     = 13;
 parameter int M1_PHRT_W    = 100;	// path history from target addresses
 parameter int M1_PHRB_W    = 28;	// path history from branch addresses
+
+// Statistical corrector, in the shape of TAGE-SC-L. The corrector is a bank of
+// signed counters that are SUMMED rather than pattern matched, so it catches
+// the branches a tagged table matches and then gets wrong -- which on nqueens
+// is 94% of the mispredicts. Sized without regard to the 64 KB budget the
+// three compared predictors were held to; this branch is about whether the
+// component pays at all.
+parameter int SC_CTR_W     = 6;		// signed counter, -32 .. 31
+parameter int SC_IDX_W     = 10;	// 1024 entries per GEHL bank
+parameter int SC_BIAS_W    = 11;	// bias indexed by pc alone
+parameter int SC_LHT_IDX_W = 8;	// local history table entries, flash restored
+parameter int SC_LHIST_W   = 16;	// bits of local history kept per branch
+parameter int SC_NG        = 6;		// GEHL banks over the target path history
+parameter int SC_NB        = 5;		// GEHL banks over the branch path history
+parameter int SC_NL        = 4;		// GEHL banks over local history
 parameter int BP_TABLES    = 2048;
 parameter int BP_IDX_W     = 11;	// $clog2(BP_TABLES)
 
