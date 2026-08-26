@@ -95,11 +95,114 @@ instruction can therefore never be observed.
 
 # Branch Prediction
 
-> **The predictor wired in is now TAGE-SC-L** (`tage_m1.sv` + `statistical_corrector.sv`), described
-> in [Statistical Correction](#statistical-correction). The tournament predictor below is still in
-> the tree and is the baseline all three of the others were measured against, so this section
-> stands as written — it is also where the sequence-number history recovery that all of them share
-> is explained.
+The predictor is **TAGE-SC-L**: a tagged, path-history TAGE shaped after the Apple Firestorm design
+(`tage_m1.sv`), with a perceptron-style statistical corrector sitting on top of it
+(`statistical_corrector.sv`). Three predictors were built and measured against each other at a
+matched 64 KB before this one was settled on; the comparison is in
+[Statistical Correction](#statistical-correction).
+
+## The M1-shaped TAGE
+
+TAGE ([Seznec and Michaud](https://jilp.org/vol8/v8paper1.pdf)) keeps several tagged tables indexed
+by progressively longer histories. A branch is answered by the **longest history that has seen this
+exact context before**, with a short-history bimodal underneath for anything no table matches. The
+shape here follows Firestorm as reverse engineered in
+[Yavarzadeh et al, *Whisper: Timing the Transient Execution of Apple Silicon*](https://arxiv.org/html/2411.13900v1),
+and three things in it are deliberately not textbook TAGE:
+
+**Path history, not direction history.** A textbook TAGE folds a register of taken/not-taken bits.
+This folds *addresses*, so the history records which branches ran and where they went rather than
+only which way they fell. Two branches that both fall through are the same event to a direction
+history and different events here.
+
+**Two history registers, updated from different places:**
+
+```
+PHRT_new = (PHRT_old << 1) ^ T[31:2]      target address    100 bits
+PHRB_new = (PHRB_old << 1) ^ B[5:2]       branch address     28 bits
+```
+
+PHRT is long and carries *where control went*; PHRB is short and carries *which branch it came
+from*. Every table indexes on both.
+
+**Six tables, four-way set associative**, 1024 sets each, on the paper's history lengths:
+
+| table | 1 | 2 | 3 | 4 | 5 | 6 |
+| --- | --- | --- | --- | --- | --- | --- |
+| PHRT bits | 100 | 57 | 32 | 18 | 11 | 6 |
+| PHRB bits | 28 | 28 | 28 | 18 | 11 | 6 |
+
+Associativity matters more here than in a direct-mapped TAGE, because a path history aliases
+differently: four branches sharing an index can each keep an entry. Each way holds a 13-bit tag, a
+3-bit prediction counter, a 2-bit usefulness counter and a valid bit, over a 2048-entry bimodal
+base.
+
+**Recovery costs more than it does for a direction history, and this is the interesting part.** A
+direction history is a pure shift, so undoing *k* branches is a right shift — which is exactly what
+the tournament predictor does with the sequence numbers described
+[below](#training-at-commit-and-rewinding-history). A path history is `(PHR << 1) ^ A`, which is
+**not invertible without knowing A**. So both registers are checkpointed into a 256-entry file
+indexed by the same sequence number the branch already carries, and recovery restores the
+checkpoint and re-applies the branch with the target control actually took. That is why the
+predictor is fed the resolved target on the recovery path at all.
+
+## Why a perceptron corrector on top
+
+The case for adding one is a measurement, not an aesthetic. Counters were added to split the
+mispredictions into the two things that can go wrong, and they are not close:
+
+| nqueens mispredictions | count |
+| --- | --- |
+| a tagged entry matched and was wrong | **36,535** |
+| no tagged entry matched at all | 2,198 |
+
+**94% of the misses are a table matching and giving the wrong answer.** More tables, longer
+histories and bigger tables all attack the second row. None of them touches the first. A tagged
+predictor answers from the single longest context that matches and commits to it — which is exactly
+right when the context *determines* the outcome, and confidently wrong when it merely *correlates*.
+
+The other predictor already in this tree does the opposite thing. A
+[perceptron](https://www.cs.utexas.edu/~lin/papers/hpca01.pdf) never matches a context at all; it
+**sums many individually weak correlations** and takes the sign. That is a worse answer when one
+context really does determine the outcome, and a better one when no single context does. The
+measurement said so directly, before any corrector existed — on nqueens, at a matched 64 KB:
+
+| nqueens | accuracy |
+| --- | --- |
+| tournament (perceptron + gshare) | 76.9% |
+| TAGE-M1 alone | 76.3% |
+| **TAGE-M1 + corrector** | **80.6%** |
+
+A far simpler predictor was **beating** the tagged one on that benchmark, and the
+[component breakdown](#branch-prediction-accuracy) shows the perceptron was the half carrying it —
+on its own it scored *above* the chooser there. The two families are not ranked; they are good at
+different branches, and the combination beats both by more than the gap between them.
+
+That is also why the corrector's bias tables are indexed by the TAGE's own prediction and its
+confidence, rather than by the pc alone. What they learn is not "which way does this branch go" but
+**"when the tables say weakly taken at this pc, what actually happens"** — the systematic error of
+the tagged predictor, which is the only thing worth a second opinion.
+
+So the corrector is the perceptron idea reused as a *second opinion* rather than as a standalone
+predictor. It sums signed counters drawn from three families — a **bias** on the pc, on the pc with
+the TAGE prediction, and on the pc with that prediction *and* how confident the tables were; **path**
+GEHL banks folded from the same two path registers the TAGE indexes with; and **local** GEHL banks
+over each branch's own recent outcomes, which is the one family the TAGE has no equivalent of.
+It overrides the tagged prediction only when the magnitude of its sum clears an adaptive threshold,
+so it stays silent on everything the TAGE already gets right.
+
+The local-history family is worth isolating, because it is where the largest single gain comes
+from and it is structurally unavailable to TAGE: TAGE indexes by *global* path, so a branch whose
+own recent outcomes are regular while its global context never repeats is invisible to it. nqueens
+is a backtracking search and is precisely that shape — the family is worth 2.8 accuracy points
+there and a rounding error everywhere else.
+
+Sizing, the ablations, and two implementation defects that made the corrector a net *loss* before
+they were found, are in [Statistical Correction](#statistical-correction).
+
+## The tournament predictor, as baseline
+
+Still in the tree, not wired in, and the thing all three of the others are measured against.
 
 A **perceptron predictor** ([Jimenez and Lin, HPCA 2001](https://www.cs.utexas.edu/~lin/papers/hpca01.pdf))
 and a **gshare** predictor run in parallel, with a per-PC chooser deciding which to believe.
@@ -110,6 +213,8 @@ and a **gshare** predictor run in parallel, with a per-PC chooser deciding which
 
 Geometry: 1024 perceptrons × 17 weights of 8 bits, 16 bits of global history, a 1024-entry gshare
 table and a 1024-entry chooser.
+
+### Training at commit, and rewinding history
 
 The part that matters in an out-of-order machine is **when** the predictor is trained. A prediction
 and its outcome are separated by an arbitrary number of cycles, and the tables move in between, so
