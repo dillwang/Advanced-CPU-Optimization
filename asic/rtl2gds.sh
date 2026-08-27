@@ -252,6 +252,30 @@ flow_python_path() {
 	return 1
 }
 
+# Does this candidate actually run? Finding something is not the same as being
+# able to use it, and this project has now been bitten by that twice: an sv2v
+# binary that downloaded fine and could not link, and a librelane package that
+# imports but whose dependencies live at /nix/store paths that only exist
+# inside a bwrap namespace. Ask it for its version before believing in it.
+flow_works() {
+	local cmd="$1"
+	$cmd --version >/dev/null 2>&1
+}
+
+# nanoHUB wraps LibreLane 3 in bubblewrap: `start` binds the install's own
+# nix directory over /nix and drops you in a devshell. Outside that namespace
+# the store paths the package needs do not resolve, so there is nothing to fix
+# from here -- the script has to be run from inside.
+find_wrapper() {
+	local r
+	while read -r r; do
+		[ -x "$r/start" ] && { printf '%s\n' "$r/start"; return 0; }
+		[ -x "${r%/nix/store/*}/start" ] && {
+			printf '%s\n' "${r%/nix/store/*}/start"; return 0; }
+	done < <(flow_roots)
+	return 1
+}
+
 # The flow and the PDK are versioned together. Picking a dev build to drive a
 # release PDK is the kind of mismatch that produces a confusing failure three
 # steps in, so say so plainly rather than let it pass.
@@ -336,6 +360,31 @@ find_flow() {
 	say "flow: $FLOW_KIND ($FLOW_CMD)"
 	[ "$FLOW_KIND" = openlane1 ] && warn "OpenLane 1 is Tcl-era and upstream-dead.
      Blocks will run; 'core' needs LibreLane for its macro handling."
+
+	if [ "$DRY" = 0 ] && ! flow_works "$FLOW_CMD"; then
+		local w
+		if w="$(find_wrapper)" && [ -n "$w" ]; then
+			die "found LibreLane, but it will not run from this shell:
+
+$($FLOW_CMD --version 2>&1 | sed 's/^/     /' | tail -4)
+
+     nanoHUB runs LibreLane 3 inside bubblewrap. $(basename "$w") binds the
+     install's own nix directory over /nix and drops you in a devshell; from
+     outside that namespace the /nix/store paths its dependencies live at do
+     not exist, which is what the import error above is. There is nothing to
+     fix from here -- enter the environment first, then run this script:
+
+       $w
+       cd $PWD && ./rtl2gds.sh $*
+
+     (\$LIBRELANE still overrides all of this if you have a better idea.)"
+		fi
+		die "found LibreLane at
+     $FLOW_CMD
+     but it fails to run:
+
+$($FLOW_CMD --version 2>&1 | sed 's/^/     /' | tail -4)"
+	fi
 	return 0
 }
 
