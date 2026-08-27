@@ -23,6 +23,8 @@ if this runs, believe this one.
 import argparse
 import os
 import re
+import shutil
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -43,6 +45,28 @@ def files_for(top, sv_files, mods, owner, support, ifcs, sram_verilog):
     return out
 
 
+def slang_argv(top, files, include_dirs, defines):
+    """The command line, shared by both backends so they cannot drift."""
+    args = ["--top", top]
+    for inc in include_dirs:
+        args += ["-I", os.path.abspath(inc)]
+    for define in defines:
+        args += ["-D", define]
+    return args + files
+
+
+def elaborate_binary(binary, top, files, include_dirs, defines):
+    """(ok, diagnostics) from a `slang` executable.
+
+    nanoHUB has no pip, so pyslang cannot be installed there -- but the
+    LibreLane install ships Slang itself, because that is what USE_SLANG runs.
+    If it is on PATH inside the devshell, it answers the same question.
+    """
+    p = subprocess.run([binary] + slang_argv(top, files, include_dirs, defines),
+                       capture_output=True, text=True)
+    return p.returncode == 0, (p.stdout or "") + (p.stderr or "")
+
+
 def elaborate(top, files, include_dirs, defines):
     """(ok, diagnostics) for one design. A fresh Driver each time -- Slang's
     state is per-compilation, and a stale one reports the previous design."""
@@ -50,12 +74,7 @@ def elaborate(top, files, include_dirs, defines):
 
     d = driver.Driver()
     d.addStandardArgs()
-    args = ["slang", "--top", top]
-    for inc in include_dirs:
-        args += ["-I", os.path.abspath(inc)]
-    for define in defines:
-        args += ["-D", define]
-    args += files
+    args = ["slang"] + slang_argv(top, files, include_dirs, defines)
 
     def quote(a):
         return '"%s"' % a if (" " in a or "\\" in a) else a
@@ -98,18 +117,37 @@ def main():
     p.add_argument("--all", action="store_true",
                    help="check every module, including ones that cannot be a "
                         "top-level design")
+    p.add_argument("--slang-bin", default="", metavar="PATH",
+                   help="a slang executable, for machines where pyslang cannot "
+                        "be installed. Autodetected on PATH")
     p.add_argument("-q", "--quiet", action="store_true",
                    help="one line per design, no diagnostics")
     a = p.parse_args()
 
     if not a.sv_file:
         sys.exit("slang_check: no sources; pass --sv-file")
+    # pyslang where pip exists; a slang executable where it does not. nanoHUB
+    # is the second case, and it ships Slang anyway -- that is what USE_SLANG
+    # runs. Either backend answers the same question from the same argv.
+    binary = a.slang_bin
     try:
+        if binary:
+            raise ImportError          # an explicit --slang-bin wins
         import pyslang  # noqa: F401
     except ImportError:
-        sys.exit("slang_check: pyslang is not installed.\n"
-                 "     pip install pyslang\n"
-                 "     (or use scripts/slang_lint.py, which needs nothing)")
+        binary = binary or shutil.which("slang") or ""
+        if not binary:
+            sys.exit("slang_check: no Slang here -- neither the pyslang module\n"
+                     "     nor a slang executable on PATH.\n"
+                     "     Where pip exists:  pip install pyslang\n"
+                     "     Where it does not: run this check before you get\n"
+                     "     here, or use scripts/slang_lint.py, which needs\n"
+                     "     nothing but Python.")
+
+    def run(top, files):
+        if binary:
+            return elaborate_binary(binary, top, files, a.include_dir, a.define)
+        return elaborate(top, files, a.include_dir, a.define)
 
     mods, owner, support = gen_config.parse_module_files(a.sv_file)
     ifcs = gen_config.parse_interface_files(a.sv_file)
@@ -131,9 +169,9 @@ def main():
             continue
         files = files_for(top, a.sv_file, mods, owner, support, ifcs,
                           a.sram_verilog)
-        ok, text = elaborate(top, files + macro_files, a.include_dir, a.define)
+        ok, text = run(top, files + macro_files)
         errs = [l for l in text.split("\n") if ": error:" in l]
-        if not macro_files:
+        if not macro_files and errs:
             keep = []
             for line in errs:
                 m = macro_re.search(line)
@@ -141,7 +179,21 @@ def main():
                     assumed.add(m.group(1))
                 else:
                     keep.append(line)
-            errs, ok = keep, (ok or not keep)
+            # A failure is only forgiven when EVERY error it reported was a
+            # reference to a macro the PDK will supply. `ok or not keep` was
+            # wrong: it turned "failed, and we could not parse why" into "ok",
+            # which is the one answer a checker must never give.
+            if errs and not keep:
+                ok = True
+            errs = keep
+        if not ok and not errs:
+            # Failed with nothing we recognised. Say so and show the tail --
+            # silence here is indistinguishable from success.
+            bad.append(top)
+            print(" ERR %-24s failed with no error line we could parse:" % top)
+            for line in [l for l in text.strip().split("\n") if l.strip()][-4:]:
+                print("       %s" % line.strip()[:110])
+            continue
         if ok:
             print("  ok %-24s %d file(s)" % (top, len(files)))
             continue

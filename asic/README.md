@@ -460,10 +460,16 @@ be done locally, in about a second per design, against **the same file list**
 gen_config hands LibreLane:
 
 ```
-pip install pyslang
+pip install pyslang             # on your own machine; nanoHUB has no pip
 ./rtl2gds.sh check              # every design
 ./rtl2gds.sh check mips_core    # just one
 ```
+
+**Run it here, not there.** nanoHUB has no pip, and that is fine — the whole
+point is to arrive with the findings already fixed. If you do run `check` on
+nanoHUB it looks for a `slang` executable on `PATH` first (the LibreLane
+install ships one; that is what `USE_SLANG` runs) and falls back to the regex
+lint, which needs nothing.
 
 ```
   ok mips_core                22 file(s)

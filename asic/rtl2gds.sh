@@ -575,13 +575,27 @@ do_check() {
 	[ -f "$HERE/src/sram_sky130.v" ] &&
 		args+=(--sram-verilog "$HERE/src/sram_sky130.v")
 	[ -n "$PDK_ROOT" ] && args+=(--pdk-root "$PDK_ROOT" --pdk "$PDK")
+	# Three ways to get the real front end, in order of what is likely to be
+	# present. nanoHUB has no pip, so pyslang cannot be installed there -- but
+	# the LibreLane install ships Slang itself, since that is what USE_SLANG
+	# runs, and a `slang` on PATH inside the devshell answers the same question.
+	local how=""
 	if "$PY" -c 'import pyslang' 2>/dev/null; then
-		say "elaborating every design with slang $("$PY" -c 'import pyslang; print(pyslang.VersionInfo.getMajor())' 2>/dev/null)"
+		how="pyslang $("$PY" -c 'import pyslang; print(pyslang.VersionInfo.getMajor())' 2>/dev/null)"
+	elif command -v slang >/dev/null 2>&1; then
+		how="$(command -v slang)"
+	fi
+	if [ -n "$how" ]; then
+		say "elaborating with $how"
 		"$PY" "$HERE/scripts/slang_check.py" "${src[@]}" 			${args[@]+"${args[@]}"} ${CHECK_TOPS:+$CHECK_TOPS}
 		return $?
 	fi
-	warn "pyslang is not installed, so this is the regex lint, not the real
-     front end. For the real thing: pip install pyslang"
+	# Do not tell someone to pip install on a machine without pip. The check is
+	# a pre-flight: the place to run it is wherever you edit the RTL.
+	warn "no Slang here -- neither the pyslang module nor a slang executable.
+     This is the regex lint, which catches less. Run ./rtl2gds.sh check on the
+     machine you edit the RTL on, where pip install pyslang works, and come
+     here with the findings already fixed."
 	"$PY" "$HERE/scripts/slang_lint.py" "${SV_FILES[@]}"
 }
 

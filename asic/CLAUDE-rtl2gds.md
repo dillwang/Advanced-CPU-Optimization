@@ -10,7 +10,7 @@ Three checks, cost order, each catches what the others cannot. Run all three.
 Do this BEFORE asking for a shell, not after.
 
 ```bash
-pip install pyslang
+pip install pyslang                         # LOCAL box. nanoHUB has NO pip.
 ./rtl2gds.sh check                          # ~1 s/design. What SYNTHESIS refuses.
 verilator --lint-only <same args as build>  # ~3 s.      What the SIMULATOR refuses.
 make verilate && ./obj_dir/V<top> -b <bench>  # ~10 min.  Whether it is still CORRECT.
@@ -24,6 +24,12 @@ semantic change.
 
 The first two cost ~13 seconds together and catch every class of failure that
 otherwise arrives one remote round trip at a time.
+
+**pip does not exist on nanoHUB.** Run the check where you edit the RTL and
+arrive with the findings fixed. If a check is needed remotely anyway: the
+LibreLane install ships Slang (that is what `USE_SLANG` runs), so drive a
+`slang` executable off `PATH` with the same argv; else fall back to the regex
+lint. Never emit `pip install` as advice on a machine without pip.
 
 ## HARD RULES
 
@@ -43,6 +49,7 @@ otherwise arrives one remote round trip at a time.
 14. `pip install pyslang` and run the real front end LOCALLY before any remote run. Build the check on the SAME file list the config generator emits — share the function, never re-derive it.
 15. Select source files by what they DEFINE (modules, interfaces, packages, transitively), never by "files with no module in them". Interfaces hide in files that also hold modules.
 16. Never trust a checker you have not seen fail. Point it at a known-bad input first. Silence from a broken checker and silence from a clean design are the same output.
+16b. A tool that exited non-zero has FAILED. Never let "we could not parse an error line" upgrade that to success — report it and print the raw tail. This exact bug shipped here and was caught only because a test stub was accidentally broken.
 17. Fix every front-end finding in ONE pass. The front end reports the whole design; one local invocation gives the entire list.
 
 ## ERROR SIGNATURES → CAUSE → FIX

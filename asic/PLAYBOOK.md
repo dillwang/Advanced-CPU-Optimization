@@ -127,6 +127,20 @@ in step 5 of its 80 happens locally in about a second per design. Everything in
 the next section was found on a remote machine, one failure per round trip,
 before anyone asked whether the front end could be run here. It can.
 
+**nanoHUB has no pip**, so this is a check you run *before you get there* — on
+the machine you edit the RTL on. That is the right place for it anyway: the
+point is to arrive with the findings already fixed. Two things soften the
+absence if you do end up needing it remotely:
+
+- The LibreLane install ships Slang itself — that is what `USE_SLANG` runs. If
+  a `slang` executable is on `PATH` inside the devshell, drive that instead of
+  the Python module; same arguments, same answer. Build the checker so either
+  backend works from one argv.
+- Failing that, the regex fallback needs nothing but Python.
+
+Never print `pip install …` as advice on a machine that has no pip. It reads as
+a fix and is a dead end.
+
 **`verilator --lint-only` is the rung people skip.** It takes the same arguments
 as the build, needs no C++ compilation, and finishes in three seconds against
 ten minutes for a full `verilate`. The `BLKLOOPINIT` trap two sections down cost
