@@ -169,6 +169,13 @@ flow_roots() {
 		*librelane*|*openlane*|*LibreLane*) roots+=("$d" "${d%/bin}") ;;
 		esac
 	done < <(printf '%s\n' "${PATH//:/$'\n'}")
+	# LibreLane 3 is packaged with Nix, so a real install looks like
+	# <root>/nix/store/<hash>-librelane-3.0.4/bin/librelane. Glob straight to
+	# those package directories: they are five levels down, and walking a whole
+	# Nix store with find is both slow and unnecessary.
+	roots+=("${PDK_ROOT%/pdks}"/nix/store/*librelane*
+	        /apps/share64/*/librelane/librelane-*/nix/store/*librelane*
+	        /apps/librelane/*/nix/store/*librelane*)
 	roots+=(/apps/librelane/*/bin /apps/librelane/* /apps/librelane
 	        /apps/share64/*/librelane/librelane-* /apps/share64/*/librelane
 	        /opt/librelane /usr/local/librelane "$HOME/LIBRELANE" "$HOME/OPENROAD")
@@ -196,6 +203,11 @@ flow_python() {
 		while read -r r; do
 			printf '%s\n' "$r/bin/python3" "$r/venv/bin/python3" \
 			              "$r/.venv/bin/python3"
+			# A Nix-built LibreLane brings its own interpreter, with the
+			# package already importable. Prefer it over anything on PATH:
+			# nanoHUB's /usr/bin/python3 is 3.6 and cannot import librelane
+			# at all.
+			ls -d "$r"/nix/store/*python3*/bin/python3 2>/dev/null || true
 		done < <(flow_roots)
 		printf '%s\n' python3.13 python3.12 python3.11 python3.10 python3.9 \
 		              python3.8 python3
@@ -215,7 +227,7 @@ flow_candidates() {
 		[ -d "$r" ] || continue
 		# Not just the exact names: a nanoHUB install may wrap it as
 		# librelane.sh, librelane-3.0.4, or a launcher with a version suffix.
-		find "$r" -maxdepth 4 -type f -perm -u+x \
+		find "$r" -maxdepth 3 -type f -perm -u+x \
 			\( -name 'librelane*' -o -name 'openlane*' \) 2>/dev/null \
 			| grep -vE '\.(py|pyc|json|yaml|yml|md|txt|log|nix)$'
 	done < <(flow_roots)
