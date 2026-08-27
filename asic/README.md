@@ -488,6 +488,27 @@ One thing the local check cannot see: the SRAM macro's own Verilog view lives
 in the PDK. With no PDK here, a reference to it is reported as assumed rather
 than as an error. Pass `-r <pdk-root>` to check it for real.
 
+**And it is not a substitute for Verilator.** Slang is a front end and enforces
+the language; Verilator is a simulator and tells you the design still computes
+the right answer. Neither covers the other, and on this core they contradicted
+each other on one line — Slang demanded `<=` on a reset loop that Verilator then
+refused with `BLKLOOPINIT`. Three rungs, cheapest first:
+
+| | cost | catches |
+| --- | --- | --- |
+| `./rtl2gds.sh check` | ~1 s/design | what synthesis will refuse |
+| `verilator --lint-only` (same args as the build) | ~3 s | what the simulator will refuse |
+| `make verilate` + all four benchmarks | ~10 min | whether it is still correct, and the cycle counts |
+
+The middle rung is the one worth adding to muscle memory. It takes the build's
+own arguments, skips the C++ compilation entirely, and would have found the
+`BLKLOOPINIT` conflict in three seconds instead of after a full rebuild:
+
+```
+docker run --rm -v "$PWD:/work" -w /work/mips_cpu nonlig/cse148wi24:latest bash -lc   'source /root/cse148env; source $CSE148_TOOLS/oss-cad-suite/environment
+   verilator --lint-only --unroll-count 512 --unroll-stmts 100000 -DSIMULATION      -Imips_core -f verilator_files --top-module mips_core -Wno-fatal'
+```
+
 ### Which modules can be a top-level design
 
 Of the 21 modules `list` reports, **nine cannot be synthesised on their own**,

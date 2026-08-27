@@ -4,6 +4,27 @@ Drop this into a repo as `CLAUDE.md`, or append it to an existing one, so it
 loads every session. Companion to `PLAYBOOK.md`: that one explains, this one
 decides. When they disagree, this one wins.
 
+## CHECK LOCALLY BEFORE PROPOSING ANY REMOTE RUN
+
+Three checks, cost order, each catches what the others cannot. Run all three.
+Do this BEFORE asking for a shell, not after.
+
+```bash
+pip install pyslang
+./rtl2gds.sh check                          # ~1 s/design. What SYNTHESIS refuses.
+verilator --lint-only <same args as build>  # ~3 s.      What the SIMULATOR refuses.
+make verilate && ./obj_dir/V<top> -b <bench>  # ~10 min.  Whether it is still CORRECT.
+```
+
+Slang and Verilator are not alternatives. Slang is a front end and enforces the
+language; Verilator is a simulator and tells you the answer is still right. A
+design passes one and fails the other in both directions — this one did, on the
+same line. Never substitute one for the other; never skip the third after a
+semantic change.
+
+The first two cost ~13 seconds together and catch every class of failure that
+otherwise arrives one remote round trip at a time.
+
 ## HARD RULES
 
 1. Get a working shell BEFORE writing any flow code. Prove it: `librelane --version` exits 0.
@@ -20,6 +41,9 @@ decides. When they disagree, this one wins.
 12. Never report success from a file's existence. `--to <step>` writes `state_out.json` for steps that ran before the failure. Gate on a metric only the wanted step produces.
 13. Append every failure's cause to one `errors.log` as it happens, and roll them up at the end.
 14. `pip install pyslang` and run the real front end LOCALLY before any remote run. Build the check on the SAME file list the config generator emits — share the function, never re-derive it.
+15. Select source files by what they DEFINE (modules, interfaces, packages, transitively), never by "files with no module in them". Interfaces hide in files that also hold modules.
+16. Never trust a checker you have not seen fail. Point it at a known-bad input first. Silence from a broken checker and silence from a clean design are the same output.
+17. Fix every front-end finding in ONE pass. The front end reports the whole design; one local invocation gives the entire list.
 
 ## ERROR SIGNATURES → CAUSE → FIX
 
@@ -43,6 +67,9 @@ decides. When they disagree, this one wins.
 ## CANONICAL COMMANDS
 
 ```bash
+# LOCAL, before any of the below
+pip install pyslang && ./rtl2gds.sh check
+
 # session, first time
 mkdir -p ~/LIBRELANE/.nix-librelane
 /apps/share64/rocky8/librelane/librelane-3.0.4/start
@@ -103,6 +130,15 @@ writes `final/`. Normal.
 - A multi-ported register file **cannot** be SRAM. Async read alone rules it
   out. Measured: a 128×32 PRF with 8 async reads + 5 writes was 581,694 µm², of
   which the flops were 87,123 (15%) — the mux network is 85%.
+- Slang requires `<=` where a variable is written nonblocking elsewhere in the
+  same `always_ff`; Verilator then rejects `<=` to an unpacked array element in
+  a loop it cannot unroll. **The two tools contradict each other on that exact
+  line.** The resolution is neither form: `tbl <= '{default: '0};`.
+- A regex checker over SystemVerilog goes SILENT, not loud, when it is wrong.
+  Specific ways: a DPI prototype (`import "DPI-C" function ...;`) opens a scope
+  that never closes and freezes a depth counter; a non-ANSI port list names
+  signals before declaring them and that is legal; a `for (int i ...)` variable
+  shadows a module-level signal of the same name.
 - `$PDK_ROOT` being exported does **not** mean you are in a shell that can run
   the flow.
 - The directory at the front of `PATH` named after the tool may hold only
@@ -128,14 +164,26 @@ writes `final/`. Normal.
 ## ORDER OF WORK (each step gates the next)
 
 ```
-1. working shell            -> librelane --version exits 0
-2. measure the PDK          -> um^2/bit per macro and per flop
-3. parse RTL, list modules  -> no tools needed
-4. synth-only, SMALLEST     -> proves frontend + config keys. minutes.
-5. synth-only, everything   -> area table; decides if the full chip is viable
-6. full flow, one small block -> proves P&R and signoff
-7. big runs
+LOCAL -- no remote session needed, do these first
+1. slang elaborate every design  -> which modules can be a top at all. seconds.
+2. verilator --lint-only         -> what the simulator refuses. 3 s.
+3. fix ALL findings in one pass  -> then full sim; must be cycle-identical
+4. parse RTL, list modules       -> no tools needed
+
+REMOTE
+5. working shell                 -> librelane --version exits 0
+6. measure the PDK               -> um^2/bit per macro and per flop
+7. synth-only, SMALLEST          -> proves config keys. minutes.
+8. synth-only, TOP + SYNTH_KEEP_HIERARCHY_MODULES for every block you want a
+                                    number for -> the whole area table in ONE
+                                    run, including blocks that cannot be a top
+9. full flow, one small block    -> proves P&R and signoff
+10. big runs
 ```
 
-Do not skip 4 and 5. They are the difference between finding a bad config key
-in five minutes and finding it in five hours.
+Step 8 replaces "synth-only, everything". N per-module runs is worse than one
+kept-hierarchy run, not just slower: the per-module runs cannot cover a module
+with an interface port, and their numbers are out of context.
+
+Do not skip 1-3, and do not skip 7-8. Each is the difference between a
+five-second answer and a five-hour one.

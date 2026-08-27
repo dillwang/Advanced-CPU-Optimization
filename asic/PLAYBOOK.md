@@ -9,15 +9,25 @@ There is a second file beside this one, `CLAUDE-rtl2gds.md`: the same knowledge
 as rules, error signatures and commands rather than prose. Drop that one in as
 `CLAUDE.md` so it loads every session; read this one when you want the why.
 
-Read the whole thing first. The single biggest time sink below is not the flow,
-it is getting a shell that can run the flow at all.
+Read the whole thing first. Two items cost more than everything else combined,
+and neither is the flow:
+
+1. **Getting a shell that can run LibreLane at all** (§1).
+2. **Not realising how much of the flow can be checked on your own machine**
+   (§2). Slang is on PyPI; the front end that decides a run's first five minutes
+   runs locally in about a second per design. Every hour lost to this project's
+   worst day was spent discovering, one remote round trip at a time, things a
+   thirteen-second local check reports all at once.
+
+Do §2 before §1 if you have RTL in hand. It needs no remote session.
 
 ---
 
 ## 1. Getting a shell that can run LibreLane
 
-**This is where the time goes.** Budget for it and do it first, before writing
-a line of the flow.
+**This is where the remote time goes.** Budget for it, and do it before writing
+a line of the flow — but after the local checks in §2, which need no shell at
+all and will change what you ask the flow to do.
 
 nanoHUB runs LibreLane 3 inside **bubblewrap**, not as a command on `PATH`.
 The entry point is a wrapper:
@@ -92,21 +102,63 @@ it beats sv2v, beyond not needing a binary that will not run:
 Keep an sv2v path as a fallback for a LibreLane built without the plugin, but
 default to Slang.
 
-### Run the front end locally first
+### Three checks, in cost order. Run all of them.
 
-**`pip install pyslang`.** Slang is on PyPI, and the elaboration LibreLane does
-in step 5 of 80 takes about a second per design locally. Everything in the next
-section was found on a remote machine, one failure per round trip, before it
-occurred to anyone to ask whether the front end could be run here. It can.
+Slang and Verilator are not alternatives and neither replaces the other. Slang
+is a **front end**: it elaborates and enforces the language. Verilator is a
+**simulator**: it tells you whether the design still computes the right answer.
+A design can pass one and fail the other in both directions, and this core did.
 
-Build the check against **the same file list** the config generator produces —
-share the function, do not re-derive it. A check of a different file list is a
-check of something other than what will run, and it will disagree with the real
-run in both directions.
+So the workflow is a ladder, cheapest first, and each rung catches a class the
+one above it cannot see:
 
-Two things a local check cannot see, and should say so about rather than fail
-on: macro Verilog views that live in the PDK, and anything downstream of
-elaboration. Everything else it sees exactly.
+| | cost | catches |
+| --- | --- | --- |
+| `slang` (via pyslang) on each design | **~1 s each** | what the synthesis front end will refuse: conformance, elaboration, missing modules and interfaces |
+| `verilator --lint-only` | **~3 s** | what the simulator will refuse: `BLKLOOPINIT`, `BLKANDNBLK`, width and case warnings |
+| `verilate` + every benchmark | **~10 min** | whether it is still correct, and what it costs in cycles |
+
+Only the third one is authoritative about behaviour, and nothing else can
+substitute for it after a semantic change. But the first two are ~13 seconds
+together and they caught every failure in this project's worst day.
+
+**`pip install pyslang`.** Slang is on PyPI, so the elaboration LibreLane does
+in step 5 of its 80 happens locally in about a second per design. Everything in
+the next section was found on a remote machine, one failure per round trip,
+before anyone asked whether the front end could be run here. It can.
+
+**`verilator --lint-only` is the rung people skip.** It takes the same arguments
+as the build, needs no C++ compilation, and finishes in three seconds against
+ten minutes for a full `verilate`. The `BLKLOOPINIT` trap two sections down cost
+a complete rebuild to discover and would have shown up here instantly.
+
+Build the Slang check against **the same file list** the config generator
+produces — share the function, do not re-derive it. A check of a different file
+list is a check of something other than what will run, and it will disagree with
+the real run in both directions.
+
+Two things a local Slang check cannot see, and should report as unchecked
+rather than fail on: macro Verilog views that live in the PDK, and anything
+downstream of elaboration.
+
+### Validate the checker against a failure you already have
+
+The regex fallback written for this project missed the exact bug that motivated
+it. A DPI prototype —
+
+```systemverilog
+import "DPI-C" function void stats_event(input string e);
+```
+
+— names a function and never closes one, so a `function`/`endfunction` depth
+counter incremented and never came back down. Every declaration below line 121
+of that file was silently skipped, and the check passed a file with a real
+defect in it.
+
+The lesson generalises past this bug: **a checker that has never been shown
+failing is not known to work.** Before trusting a new one, point it at a
+known-bad input and confirm it says so. Silence from an unvalidated checker and
+silence from a clean design are the same output.
 
 ### Slang is stricter than Verilator, and that is the point
 
@@ -130,9 +182,15 @@ On one real core, three constructs that Verilator waves through were rejected:
 - **a top-level module with an interface port** — see below. Not a bug at all.
 
 Budget a pass for these. They are cheap individually and each one blocks a whole
-module, so they arrive all at once and look worse than they are. Re-run the
-simulation afterwards: none of the fixes should change a cycle, and if one does,
-it was not the fix you thought it was.
+module, so they arrive all at once and look worse than they are.
+
+Fix them **all at once**, not one per run — the front end reports every error in
+the design, so one local invocation gives you the whole list. Three were found
+one-per-round-trip before the local check existed; the remaining twenty-seven
+took one pass afterwards.
+
+Re-run the simulation when you are done: none of these fixes should change a
+cycle, and if one does, it was not the fix you thought it was.
 
 ### A module with an interface port cannot be a top-level design
 
@@ -278,6 +336,16 @@ what each step *changed*, plus any `ERROR` line, plus the slowest steps. A
 ~100-line digest script pays for itself the first time you use it, and it reads
 a run directory only — so it works mid-run and from outside the devshell.
 
+**Select source files by what they define, not by what kind of file they are.**
+Handing a per-module run "the files with no module in them, plus the file owning
+each module I need" is the obvious rule and it is wrong. Interfaces, packages and
+typedefs live wherever someone put them, and in this core `d_cache_input_ifc` sat
+inside `d_cache.sv` — a file with a module in it. Two designs that used the
+interface without using the module got a file list missing it, and would have
+died at `unknown interface 'd_cache_input_ifc'`. Include a file when it defines
+anything the design *names*, transitively, and it stops mattering where things
+live.
+
 **Measure the PDK, do not recall it.** Read macro `SIZE` from LEF and flop
 `SIZE` from the standard cell LEF and compute µm²/bit yourself. Real sky130
 numbers, for calibration: `dfxtp_1` 20.0 µm²/bit (50.0 at 40% utilisation),
@@ -287,7 +355,30 @@ heavy peripheral overhead.
 
 ---
 
-## 5. Bash traps that cost real time
+## 5. Traps in the tooling you write
+
+Writing a parser for SystemVerilog by regex is a bad idea that is nonetheless
+sometimes the right call — as a fallback when the real front end is not
+installed. If you do it, these are the specific ways it goes quiet:
+
+- **A DPI prototype opens a scope it never closes.**
+  `import "DPI-C" function void f(...);` matches `function` and has no
+  `endfunction`. A depth counter gets stuck and skips every declaration below
+  it, in silence. Skip `import`/`export`/`extern` lines before counting anything.
+- **A non-ANSI port list legitimately names signals before declaring them.**
+  `output [7:0] x;` above `logic [7:0] x;` is correct Verilog, not a defect.
+  Find where the module header closes and start the check after it.
+- **A `for (int i = ...)` loop variable shadows a module-level signal of the
+  same name.** Without scope tracking you will report the inner use as a
+  forward reference to the outer declaration. Skipping names that appear in any
+  loop header is a crude fix that costs little.
+- **A module name and a signal name can collide.** Exclude the module's own name.
+
+Each of these produced a false result on the first run of a ~200-line checker.
+Three were false positives, which is annoying; one was a false negative, which
+is dangerous. See "Validate the checker against a failure you already have".
+
+## 6. Bash traps that cost real time
 
 - **`set -e` is disabled inside functions called from a `||` list.** A function
   invoked as `f || warn` will keep going after an internal failure. Check
@@ -306,18 +397,33 @@ heavy peripheral overhead.
 
 ---
 
-## 6. Order of work
+## 7. Order of work
 
-1. Get a working shell. Prove it with `librelane --version`.
-2. Measure the PDK — µm²/bit for every macro and a flop. Cheap, and it frames
+Everything before step 5 runs on your own machine and needs no remote session
+at all. That ordering is the single biggest thing this project got wrong on the
+first pass.
+
+1. **`pip install pyslang` and elaborate every design locally.** Seconds. This
+   tells you which modules can be a top-level design at all, and it is the
+   answer to a question you would otherwise pay for one round trip at a time.
+2. **`verilator --lint-only`.** Three seconds. Catches what the simulator will
+   refuse, which is not the same set.
+3. **Fix every RTL finding in one pass, then re-run the full simulation.** The
+   fixes should be cycle-identical; if one is not, it was not the fix you
+   thought it was.
+4. Parse the RTL and list what is hardenable. Still no tools needed.
+5. Get a working shell on the remote machine. Prove it with `librelane --version`.
+6. Measure the PDK — µm²/bit for every macro and a flop. Cheap, and it frames
    every later decision.
-3. Parse the RTL and list what is hardenable. No tools needed.
-4. **Synthesis only, smallest module.** This is the run that proves the
-   frontend reads your RTL and the flow accepts your config. Minutes, not hours.
-5. Synthesis only, everything. Now you have an area table, which is what decides
-   whether the full chip is worth attempting and where to cut.
-6. Full flow on one small block, all the way to GDS.
-7. Only then the big runs.
+7. **Synthesis only, smallest module.** The run that proves the flow accepts
+   your config. Minutes, not hours.
+8. **Synthesis only, the top, with `SYNTH_KEEP_HIERARCHY_MODULES` set** for
+   every block you want a number for. One run, one area table, and it covers
+   the blocks that cannot be a top-level design. This is better than N
+   per-module runs, not just cheaper.
+9. Full flow on one small block, all the way to GDS.
+10. Only then the big runs.
 
-Steps 4 and 5 are the ones people skip. Do not: they are the difference between
-finding out a config key is wrong in five minutes and finding out in five hours.
+Steps 7 and 8 are the ones people skip on the remote side, and steps 1–3 are the
+ones people skip entirely. Skipping either turns a five-second answer into a
+five-hour one.
