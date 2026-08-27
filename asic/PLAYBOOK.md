@@ -92,6 +92,47 @@ it beats sv2v, beyond not needing a binary that will not run:
 Keep an sv2v path as a fallback for a LibreLane built without the plugin, but
 default to Slang.
 
+### Slang is stricter than Verilator, and that is the point
+
+Expect a design that has only ever been simulated to fail its first Slang run.
+On one real core, three constructs that Verilator waves through were rejected:
+
+- **use before declaration** — a signal referenced in a child's port list and
+  declared twenty lines below it. Two instances. Pure reordering to fix.
+- **mixing blocking and nonblocking assignments to one variable** inside a
+  single `always_ff` — reset cleared a table with `=`, everything else wrote it
+  with `<=`. Illegal SystemVerilog; Verilator does not care.
+- **a top-level module with an interface port** — see below. Not a bug at all.
+
+Budget a pass for these. They are cheap individually and each one blocks a whole
+module, so they arrive all at once and look worse than they are. Re-run the
+simulation afterwards: none of the fixes should change a cycle, and if one does,
+it was not the fix you thought it was.
+
+### A module with an interface port cannot be a top-level design
+
+```
+alu.sv:35:26: error: top-level module 'alu' has unconnected interface port 'in'
+```
+
+This is the one that reshapes the plan, so find it out early. If the design puts
+interfaces on its module boundaries — and a modern SystemVerilog core usually
+does — then a large fraction of its modules **cannot be pointed at as a
+top-level design at all**, by any front end. sv2v hides this by inlining them
+into the parent; Slang reports it. Same capability lost either way.
+
+On one core it was 9 of 21 modules, including both caches, the load/store queue
+and the out-of-order backend.
+
+**The fix is not per-module runs, it is `SYNTH_KEEP_HIERARCHY_MODULES`.** One
+synthesis of the top with named boundaries preserved gives the area of every
+block at once — including the ones that cannot stand alone — and costs one run
+instead of twenty. Reach for it as the default way to build an area table, and
+keep standalone hardening for the blocks you actually intend to place as macros.
+
+Check which modules are interface-free before planning anything around
+per-module runs. It is a five-minute grep and it decides the shape of the flow.
+
 Note `SYNTH_HIERARCHY_MODE` interacts with it: with Slang you must pass
 `--keep-hierarchy` in `SLANG_ARGUMENTS` separately.
 
@@ -190,6 +231,21 @@ second. Hierarchy buys tractability, and costs area and cross-boundary timing.
 **Every step is a checkpoint.** LibreLane writes `state_out.json` per step. Use
 `--last-run` and `--from <step>` to resume. If your script stamps a fresh run
 tag every invocation it silently throws all of that away.
+
+**Never let a truncated run report success.** `--to <step>` leaves a
+`state_out.json` behind for whatever steps did run, so "metrics exist" proves
+nothing — a run that died in step 5 of 80 writes them too. Gate the success
+message on a metric that only the step you wanted produces: a cell count for
+synthesis, a GDS for a full run. This flow reported `ok` for twenty-one designs
+that had all failed in step 5, because the check was for a file rather than for
+a number in it.
+
+**Aggregate errors as they happen.** A failure's cause is one line in one step
+log inside one design's run directory, and with `-j` several designs interleave
+their output on the way past. Append a short block per failure — module, exit
+code, last step, the deduplicated `error:` lines — to a single file, and print a
+one-line-per-failure roll-up at the end. Build the block in a temp file and
+append it with one `cat` so concurrent writers cannot interleave.
 
 **Do not read the scroll; diff the metrics.** A run is ~80 steps and tens of
 megabytes. Each step's `state_out.json` holds its metrics, so the useful view is

@@ -556,17 +556,17 @@ module rename_rob (
 	begin
 		if (~rst_n)
 		begin
-			// Blocking assignment for these table clears. A delayed assignment
-			// to an array inside a loop is not supported once the array gets
-			// large, and nothing else writes them on this edge, so the two
-			// forms are equivalent here. Keeping it blocking lets PHYS_REGS be
-			// raised without the reset failing to elaborate.
+			// Nonblocking, to match how rmt and fl are written everywhere else
+			// in this block. Mixing the two forms on one variable is illegal
+			// SystemVerilog -- Verilator lets it pass, Slang does not -- and
+			// nothing else writes these on the reset edge, so the two forms
+			// were equivalent here anyway.
 			for (int i = 0; i < ARCH_REGS; i++)
-				rmt[i] = preg_t'(i);
+				rmt[i] <= preg_t'(i);
 			// Architectural registers own the low physical registers at reset,
 			// so the free list starts out holding the rest of the file.
 			for (int i = 0; i < PHYS_REGS; i++)
-				fl[i] = preg_t'(ARCH_REGS + i);
+				fl[i] <= preg_t'(ARCH_REGS + i);
 			fl_head <= '0;
 			fl_count <= PHYS_REGS - ARCH_REGS;
 

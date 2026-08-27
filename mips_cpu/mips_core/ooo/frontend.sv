@@ -266,12 +266,12 @@ module frontend (
 
 	logic branch_pushed;
 	assign branch_pushed = hit_found && (push_n > hit_slot);
+	logic fe_taken;
+	assign fe_taken = branch_pushed && (hit_uncond || (bp_prediction == TAKEN));
+
 	assign bp_req_valid = branch_pushed && !hit_uncond;
 	assign bp_req_pc = hit_pc;
 	assign bp_req_target = fe_taken ? hit_target : (hit_pc + `ADDR_WIDTH'd8);
-
-	logic fe_taken;
-	assign fe_taken = branch_pushed && (hit_uncond || (bp_prediction == TAKEN));
 
 	// Did the delay slot make it into the buffer in the same cycle?
 	logic slot_pushed;

@@ -112,11 +112,14 @@ Verilog frontend reads none of that. There are two ways round it.
 **`--frontend slang` (the default).** LibreLane has a Slang-based frontend;
 setting `USE_SLANG` has it read the `.sv` files directly, with
 `VERILOG_INCLUDE_DIRS` pointing at `mips_core/` for `mips_core.svh`. Nothing is
-lowered and nothing is inlined, so **every module survives** — `d_cache`,
-`i_cache`, `lsq`, `ooo_backend`, `alu`, `decoder`, `stream_buffer`,
-`d_prefetcher` and `memory_arbiter` are all real designs you can harden, 22
-modules against sv2v's 12. That is a much better hierarchy to cut, so this is
-the default.
+lowered and nothing is inlined, so **every module survives as a module** —
+`d_cache`, `i_cache`, `lsq`, `ooo_backend`, `alu`, `decoder`, `stream_buffer`,
+`d_prefetcher` and `memory_arbiter` are all still there, 22 modules against
+sv2v's 12. That is a much better hierarchy to cut, so this is the default.
+
+Surviving is not the same as being hardenable on its own, though, and the
+difference caught this flow out — see [Which modules can be a top-level
+design](#which-modules-can-be-a-top-level-design) below.
 
 **`--frontend sv2v`.** Lowers every file named in `mips_cpu/verilator_files` to
 one flat Verilog-2005 `build/mips_core.v` before LibreLane sees it. Use it if
@@ -450,6 +453,65 @@ and the PDN wants met5 for straps besides. So `hier` now builds children at
 
 This is the same reason Caravel user projects are built at met4.
 
+### Which modules can be a top-level design
+
+Of the 21 modules `list` reports, **nine cannot be synthesised on their own**,
+and the reason is not a bug in any of them:
+
+```
+../mips_cpu/mips_core/alu.sv:35:26: error: top-level module 'alu' has
+unconnected interface port 'in'
+```
+
+A module whose ports are SystemVerilog interfaces has nothing to bind them to
+when it is the top. Verilator never meets this, because it always elaborates
+from `mips_core` downward. sv2v never meets it either — it answers the question
+by inlining such a module into its parent, which is the same capability being
+lost, just silently. Slang says it out loud.
+
+| hardenable alone | needs a parent |
+| --- | --- |
+| `tage_m1`, `statistical_corrector`, `prf`, `rename_rob`, `issue_queue`, `frontend`, `btb`, `cache_bank`, `cache_bank_core`, `ingress_splitter`, `egress_priority_arbiter`, `mips_core` | `alu`, `decoder`, `d_cache`, `i_cache`, `lsq`, `ooo_backend`, `memory_arbiter`, `stream_buffer`, `d_prefetcher` |
+
+Both hierarchical cut points — `tage_m1` and `statistical_corrector` — are in
+the left column, and so is `mips_core`, so the intended flow is not blocked by
+this. What it does block is a standalone area figure for the four blocks in the
+right column that matter: `d_cache`, `i_cache`, `lsq` and `ooo_backend`.
+
+**Use `--keep` for those.** `SYNTH_KEEP_HIERARCHY_MODULES` preserves named
+boundaries through an otherwise flat run, so one synthesis of `mips_core` gives
+the area of every named block at once:
+
+```
+./rtl2gds.sh --synth-only --keep d_cache --keep i_cache --keep lsq              --keep ooo_backend --keep rename_rob --keep tage_m1 core
+```
+
+That is both cheaper than 21 separate runs and the only way to get numbers for
+a block that cannot stand alone. The cost is that the optimiser stops working
+across those boundaries, so the areas are a measurement rather than what you
+would ship.
+
+### Slang is stricter than Verilator
+
+Three constructs here simulate correctly under Verilator and are rejected by
+Slang. Two were genuine LRM violations; all three are now fixed in the RTL:
+
+| where | what | fix |
+| --- | --- | --- |
+| `ooo/ooo_backend.sv` | `mv_valid` / `mv_rob_idx` used in `RENAME_ROB`'s port list twenty lines above their declaration | declarations moved above the instantiation |
+| `ooo/frontend.sv` | `fe_taken` read by `bp_req_target` two lines before it is declared | declaration moved up |
+| `ooo/rename_rob.sv` | `rmt` and `fl` written blocking at reset and nonblocking everywhere else in the same `always_ff` | reset made nonblocking |
+
+All three are pure reorderings or a form change on a reset-only assignment. All
+four benchmarks are cycle-identical with zero golden-trace mismatches after
+them. The third carried a comment explaining that blocking was chosen to dodge
+a Verilator array-assignment limit; that limit does not bite at the current
+`PHYS_REGS`, and elaboration was re-checked.
+
+The general point: **Verilator is not a conformance checker.** A design that
+simulates is not necessarily one a stricter front end will read, and synthesis
+is where you find out.
+
 ### Flattening
 
 `SYNTH_HIERARCHY_MODE` **already defaults to `flatten`** in LibreLane, so the
@@ -508,6 +570,7 @@ get for free.
 | `PLAYBOOK.md` | portable notes for building this flow again in another repo |
 | `CLAUDE-rtl2gds.md` | the same as rules and error signatures; drop in as `CLAUDE.md` |
 | `scripts/report.py` | digest a run: what each step changed, errors, slowest steps |
+| `build/errors.log` | written by the flow: every failure's cause, in one place |
 | `prepare.sh` | only if nanoHUB has no outbound network — lowers the RTL locally in the CSE148 container and tars up what to upload |
 
 ## If sv2v isn't there

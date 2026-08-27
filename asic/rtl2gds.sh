@@ -33,6 +33,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 RTL="$REPO/mips_cpu"
 BUILD="$HERE/build"
+ERRLOG="$BUILD/errors.log"
+FAILDIR="$BUILD/.failed"
 WORK="$BUILD/work"
 RESULTS="$HERE/results"
 FLAT="$BUILD/mips_core.v"
@@ -56,6 +58,7 @@ JOBS="$( { command -v nproc >/dev/null && nproc; } || echo 1 )"
 [ "$JOBS" -gt 4 ] && JOBS=4
 FETCH_SV2V=0
 SYNTH_ONLY=0
+KEEP_MODS=""
 DRY=0
 RESUME=0
 FROM_STEP=""
@@ -100,6 +103,10 @@ Options:
                        constraints (default 2)
       --max-layer L    RT_MAX_LAYER for the top design (default: PDK's met5)
       --clock-gate N   gate enabled flop groups of >= N bits (default off)
+      --keep MOD       keep MOD's boundary through an otherwise flat run, so
+                       its area can be read back separately. Repeatable, and
+                       the one way to get per-module numbers for a block that
+                       cannot be synthesised on its own
       --hierarchy M    SYNTH_HIERARCHY_MODE: flatten (LibreLane's default),
                        deferred_flatten, or keep
       --frontend F     slang (default; LibreLane reads the SystemVerilog) or
@@ -131,6 +138,7 @@ while [ $# -gt 0 ]; do
 		--max-layer)   MAX_LAYER="$2"; shift 2 ;;
 		--clock-gate)  CLOCK_GATE="${2:-8}"; shift 2 ;;
 		--hierarchy)   HIER_MODE="$2"; shift 2 ;;
+		--keep)        KEEP_MODS="$KEEP_MODS $2"; shift 2 ;;
 		--frontend)    FRONTEND="$2"; shift 2 ;;
 		-h|--help)     usage 0 ;;
 		-*)            usage 1 ;;
@@ -596,6 +604,8 @@ write_config() {
 	[ -n "$layer" ] && args+=(--max-layer "$layer")
 	[ "$CLOCK_GATE" != 0 ] && args+=(--clock-gate "$CLOCK_GATE")
 	[ -n "$HIER_MODE" ] && args+=(--hierarchy-mode "$HIER_MODE")
+	local km
+	for km in $KEEP_MODS; do args+=(--keep-hierarchy "$km"); done
 
 	# Always run, even under --dry-run: this only writes local files, and doing
 	# it is what lets the dry run tell you which designs carry macros and so
@@ -799,8 +809,11 @@ harden() {
 
 	if [ "$SYNTH_ONLY" = 1 ]; then
 		say "$mod: synthesis only"
+		# This return used to be an unconditional 0, which made every failed
+		# synthesis look like a success. A run that dies in step 5 of 80 still
+		# leaves state_out.json behind, so collect() found metrics and said ok.
 		run_flow "$mod" synth
-		return 0
+		return $?
 	fi
 
 	if ! has_macros "$mod"; then
@@ -812,7 +825,7 @@ harden() {
 	# With macros the run is two passes: their instance paths do not exist
 	# until synthesis has flattened the hierarchy, and the floorplan needs them.
 	say "$mod: pass 1 of 2, synthesis, to find out what the macro instances are called"
-	run_flow "$mod" synth
+	run_flow "$mod" synth || { warn "$mod: synthesis failed; nothing to floorplan"; return 1; }
 	[ "$DRY" = 1 ] && return 0
 
 	local runsdir; runsdir="$(ls -1dt "$dir"/runs/*/ 2>/dev/null | head -1)"
@@ -880,7 +893,14 @@ do_hier() {
 			MOD_MAX_LAYER="$CHILD_MAX_LAYER"
 			say "$m: RT_MAX_LAYER=$MOD_MAX_LAYER, reserving the top layer for $top"
 		fi
-		harden "$m" || { warn "$m did not finish; the designs above it need it"; MOD_MAX_LAYER=""; return 1; }
+		local hrc=0
+		harden "$m" || hrc=$?
+		if [ "$hrc" != 0 ]; then
+			warn "$m did not finish; the designs above it need it"
+			record_failure "$m" "$hrc"
+			MOD_MAX_LAYER=""
+			return 1
+		fi
 		MOD_MAX_LAYER=""
 		[ "$DRY" = 1 ] || collect "$m"
 		# Only feed a block upward once it actually has views to feed.
@@ -898,6 +918,43 @@ do_hier() {
 		fi
 	done
 	return 0
+}
+
+# ======================================================== failure accounting
+# A failed run buries its cause in one step log inside one design's run
+# directory, and with -j several designs interleave their output on the way
+# past. So the single line you actually want -- the error -- is the hardest
+# thing in the run to find. Put every failure in one file as it happens.
+record_failure() {
+	local mod="$1"
+	local rc="${2:-1}"
+	mkdir -p "$FAILDIR"
+	printf '%s' "$rc" > "$FAILDIR/$mod"
+	local run; run="$(ls -1dt "$WORK/$mod"/runs/*/ 2>/dev/null | head -1)" || true
+	local tmp="$FAILDIR/$mod.block"
+	{
+		printf '
+===== %s: exit %s at %s
+' "$mod" "$rc" "$(date '+%F %T')"
+		if [ -z "$run" ]; then
+			printf 'no run directory -- it failed before the flow started
+'
+		else
+			printf 'run:      %s
+' "$run"
+			local step; step="$(ls -1d "$run"/[0-9]*/ 2>/dev/null | tail -1)"
+			[ -n "$step" ] && printf 'last step: %s
+' "$(basename "$step")"
+			# The tools do not agree on a format and LibreLane re-prints the
+			# tail of any log it is unhappy about, so match loosely, strip the
+			# indent it adds, and drop the repeats.
+			grep -hE '(error|ERROR|Error|FATAL|fatal):' 				"$run"/[0-9]*/*.log 2>/dev/null |
+				sed 's/^[[:space:]]*//' | awk '!seen[$0]++' | head -30
+		fi
+	} > "$tmp" 2>/dev/null || true
+	# One append, so concurrent recorders cannot interleave line by line.
+	cat "$tmp" >> "$ERRLOG" 2>/dev/null || true
+	rm -f "$tmp"
 }
 
 # ============================================================ results, summary
@@ -939,7 +996,22 @@ json.dump(d.get("metrics", d), open(sys.argv[2], "w"), indent=2)' \
 	if [ -f "$RESULTS/$mod/$mod.gds" ]; then
 		ok "$mod: $RESULTS/$mod/$mod.gds"
 	elif [ "$SYNTH_ONLY" = 1 ]; then
-		ok "$mod: synthesis only, metrics in $RESULTS/$mod/metrics.json"
+		# The fallback above will happily copy the metrics of a run that died
+		# in step 2, so the presence of metrics.json proves nothing. What
+		# proves synthesis ran is a cell count.
+		local cells
+		cells="$("$PY" -c 'import json,sys
+try: m = json.load(open(sys.argv[1]))
+except Exception: sys.exit(1)
+m = m.get("metrics", m)
+v = m.get("design__instance__count")
+sys.exit(1) if v in (None, "") else print(int(v))' 			"$RESULTS/$mod/metrics.json" 2>/dev/null)" || cells=""
+		if [ -n "$cells" ]; then
+			ok "$mod: synthesis only, $cells cells, metrics in $RESULTS/$mod/metrics.json"
+		else
+			warn "$mod: no synthesis result -- see $ERRLOG"
+			return 1
+		fi
 	else
 		warn "$mod: no GDS -- see $run for where it stopped"
 	fi
@@ -947,8 +1019,17 @@ json.dump(d.get("metrics", d), open(sys.argv[2], "w"), indent=2)' \
 }
 
 summary() {
-	[ -d "$RESULTS" ] || return 0
-	say "summary"
+	# Not `[ -d "$RESULTS" ] || return 0`: when everything fails there are no
+	# results at all, and that is precisely the run whose summary matters.
+	if [ -d "$RESULTS" ]; then
+		say "summary"
+		summary_table
+	fi
+	failures
+}
+
+# The per-design metrics table.
+summary_table() {
 	"$PY" - "$RESULTS" <<'PY'
 import json, os, sys
 root = sys.argv[1]
@@ -988,9 +1069,34 @@ for r in rows:
 PY
 }
 
+failures() {
+	# The table above lists what produced numbers. What failed produces no row
+	# at all, which is exactly the wrong way round -- the failures are what you
+	# came to read about.
+	if [ -n "$(ls -A "$FAILDIR" 2>/dev/null)" ]; then
+		printf '
+'
+		warn "$(ls -1 "$FAILDIR" | wc -l | tr -d ' ') design(s) failed: $(ls -1 "$FAILDIR" | tr '
+' ' ')"
+		say "every error, in flow order, is in $ERRLOG"
+		# One line each, so the terminal says what went wrong without anyone
+		# having to open the file.
+		local m first
+		for m in $(ls -1 "$FAILDIR"); do
+			first="$(awk -v want="===== $m: exit" '
+				index($0, want) == 1 { on = 1; next }
+				on && /^===== / { exit }
+				on && /error:/  { sub(/^[[:space:]]*/, ""); print; exit }' "$ERRLOG" 2>/dev/null)"
+			[ -n "$first" ] && printf '    %-20s %s
+' "$m" "$(printf '%s' "$first" | cut -c1-96)"
+		done
+	fi
+}
+
 # ========================================================================= main
 main() {
 	mkdir -p "$BUILD" "$WORK" "$RESULTS"
+	rm -rf "$FAILDIR"; rm -f "$ERRLOG"
 	case "${TARGETS[0]}" in
 		list|--list) do_list; exit 0 ;;
 		report)
@@ -1050,17 +1156,41 @@ main() {
 	for m in "${want[@]}"; do
 		if [ "$m" = mips_core ]; then
 			wait
-			harden mips_core || { warn "mips_core did not finish"; rc=1; }
-			[ "$DRY" = 1 ] || collect mips_core
+			if harden mips_core; then
+				[ "$DRY" = 1 ] || collect mips_core || { record_failure mips_core 1; rc=1; }
+			else
+				local hrc=$?
+				warn "mips_core did not finish"
+				[ "$DRY" = 1 ] || collect mips_core || true
+				record_failure mips_core "$hrc"
+				rc=1
+			fi
 		elif [ "$JOBS" -gt 1 ] && [ ${#want[@]} -gt 1 ] && [ "$DRY" = 0 ]; then
 			while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n || true; done
-			( harden "$m" && collect "$m" ) > "$BUILD/$m.log" 2>&1 &
+			(
+				if harden "$m"; then
+					collect "$m" || record_failure "$m" 1
+				else
+					hrc=$?; collect "$m" || true; record_failure "$m" "$hrc"
+				fi
+			) > "$BUILD/$m.log" 2>&1 &
 		else
-			harden "$m" || { warn "$m did not finish"; rc=1; }
-			[ "$DRY" = 1 ] || collect "$m"
+			if harden "$m"; then
+				[ "$DRY" = 1 ] || collect "$m" || { record_failure "$m" 1; rc=1; }
+			else
+				local hrc=$?
+				warn "$m did not finish"
+				[ "$DRY" = 1 ] || collect "$m" || true
+				record_failure "$m" "$hrc"
+				rc=1
+			fi
 		fi
 	done
 	wait
+
+	# Parallel jobs ran in subshells, so their failures come back through the
+	# filesystem or not at all.
+	[ -n "$(ls -A "$FAILDIR" 2>/dev/null)" ] && rc=1
 
 	[ "$DRY" = 1 ] || summary
 	return $rc

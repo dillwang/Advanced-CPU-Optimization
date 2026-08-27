@@ -16,6 +16,9 @@ decides. When they disagree, this one wins.
 8. Hierarchical children build one routing layer below the top (met4 vs met5 on sky130A).
 9. Do not read tool logs to find status. Read `runs/<tag>/<NN>-<step>/state_out.json` and diff metrics.
 10. Verify config variable names against the installed LibreLane source. Do not recall them.
+11. A module with an interface port CANNOT be a top-level design. Check which modules are interface-free BEFORE planning per-module runs.
+12. Never report success from a file's existence. `--to <step>` writes `state_out.json` for steps that ran before the failure. Gate on a metric only the wanted step produces.
+13. Append every failure's cause to one `errors.log` as it happens, and roll them up at the end.
 
 ## ERROR SIGNATURES → CAUSE → FIX
 
@@ -28,6 +31,10 @@ decides. When they disagree, this one wins.
 | `Can't resolve task name '\<name>'` | a DPI call site is unguarded while its import is inside `` `ifdef SIMULATION `` | guard the `always` block in the RTL; it is an RTL bug |
 | `no module '<name>'` from your own script after discovery succeeded | your module lookup reads an sv2v artifact that the Slang path never creates | make module discovery frontend-aware |
 | a step reports an unknown config key | version skew between your keys and the installed LibreLane | grep that version's source for the key |
+| `top-level module 'X' has unconnected interface port 'y'` | X's ports are SystemVerilog interfaces; nothing binds them when X is top. Not a bug — no front end can do this | do not harden X alone. Use `SYNTH_KEEP_HIERARCHY_MODULES` on its parent to get its area |
+| `<sig> used before its declaration` / `note: declared here` below the use | Slang enforces declare-before-use; Verilator does not | move the declaration above the first reference. Pure reordering |
+| `cannot mix blocking and nonblocking assignments` | one variable written `=` in the reset branch and `<=` elsewhere in the same `always_ff` | make them agree. Re-run the simulation: it should be cycle-identical |
+| every design reports ok but each log ends in `ERROR` | success was inferred from a file that a truncated run also writes | gate on a metric, not a path |
 | flow and PDK from different install trees | six versions coexist under `/apps/share64/*/librelane/` | match them; `$PDK_ROOT` says which the environment intends |
 
 ## CANONICAL COMMANDS
@@ -75,7 +82,17 @@ writes `final/`. Normal.
   before `DetailedRouting`. There is no `optDesign -postroute -drv -inc`.
   A repair loop = re-run with a loosened constraint, not an incremental ECO.
 - sv2v **inlines any module with an interface port into its parent**. It
-  destroys your hierarchical cut points. Slang does not.
+  destroys your hierarchical cut points. Slang does not — but a module with an
+  interface port still cannot be a top-level design under either. Surviving the
+  frontend and being hardenable alone are different properties. On one real
+  core, 9 of 21 modules were unhardenable this way, including both caches, the
+  LSQ and the OoO backend.
+- The area table for those comes from **one** run of the top with
+  `SYNTH_KEEP_HIERARCHY_MODULES` set, not from N per-module runs. Cheaper, and
+  it works for blocks that cannot stand alone.
+- **Verilator is not a conformance checker.** A design that simulates cleanly
+  can still be rejected by Slang: declare-before-use and mixed blocking/
+  nonblocking assignment are both errors there and silent in Verilator.
 - sky130 SRAM beats flops by ~**2.9×** per bit, not 10×. OpenRAM carries heavy
   peripheral overhead. Measure: macro `SIZE` from LEF, flop `SIZE` from the SCL
   LEF. Reference: `dfxtp_1` 20.0 µm²/bit (50.0 at 40% util),

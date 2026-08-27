@@ -103,6 +103,11 @@ module ooo_backend (
 		end
 	end
 
+	// Declared ahead of RENAME_ROB: its port list references them, and a
+	// reference has to come after the declaration it names.
+	logic mv_valid;
+	rob_idx_t mv_rob_idx;
+
 	rename_rob RENAME_ROB (
 		.clk, .rst_n,
 		.fe_uop, .fe_stall,
@@ -132,8 +137,6 @@ module ooo_backend (
 	uop_t issue_uop [ISSUE_WIDTH];
 
 	logic lsq_accept, lsq_load_free, lsq_has_unresolved;
-	logic mv_valid;
-	rob_idx_t mv_rob_idx;
 	rob_idx_t lsq_oldest_unresolved;
 
 	issue_queue ISSUE_QUEUE (
