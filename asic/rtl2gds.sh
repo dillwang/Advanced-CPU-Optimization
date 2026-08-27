@@ -374,6 +374,7 @@ $($FLOW_CMD --version 2>&1 | sed 's/^/     /' | tail -4)
      not exist, which is what the import error above is. There is nothing to
      fix from here -- enter the environment first, then run this script:
 
+       mkdir -p ~/LIBRELANE/.nix-librelane   # the empty root it binds as /
        $w
        cd $PWD && ./rtl2gds.sh $*
 
