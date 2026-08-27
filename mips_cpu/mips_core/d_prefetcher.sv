@@ -364,20 +364,20 @@ module d_prefetcher #(
 		begin
 			for (int i = 0; i < DEPTH; i++)
 			begin
-				slot_valid[i] = 1'b0;
-				slot_busy[i] = 1'b0;
-				slot_kill[i] = 1'b0;
-				slot_line[i] = '0;
+				slot_valid[i] <= 1'b0;
+				slot_busy[i] <= 1'b0;
+				slot_kill[i] <= 1'b0;
+				slot_line[i] <= '0;
 			end
 			for (int i = 0; i < STREAMS; i++)
 			begin
-				st_valid[i] = 1'b0;
-				st_last[i] = '0;
-				st_stride[i] = '0;
-				st_conf[i] = '0;
+				st_valid[i] <= 1'b0;
+				st_last[i] <= '0;
+				st_stride[i] <= '0;
+				st_conf[i] <= '0;
 			end
-			for (int i = 0; i < MK_ENT; i++)
-				mk_valid[i] = 1'b0;
+			// Whole-table clear; see the note in statistical_corrector.
+			mk_valid <= '{default: 1'b0};
 			st_victim <= '0;
 			slot_victim <= '0;
 			q_head <= '0;

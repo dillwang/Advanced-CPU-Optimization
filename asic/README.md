@@ -453,6 +453,41 @@ and the PDN wants met5 for straps besides. So `hier` now builds children at
 
 This is the same reason Caravel user projects are built at met4.
 
+### Check it here before you run it there
+
+Slang is on PyPI. That means the elaboration LibreLane does in step 5 of 80 can
+be done locally, in about a second per design, against **the same file list**
+gen_config hands LibreLane:
+
+```
+pip install pyslang
+./rtl2gds.sh check              # every design
+./rtl2gds.sh check mips_core    # just one
+```
+
+```
+  ok mips_core                22 file(s)
+  -- d_cache                  cannot be a top-level design: 1 interface port(s)
+ ERR lsq                      2 error(s)
+       lsq.sv:103:9: error: unknown interface 'd_cache_input_ifc'
+```
+
+Three outcomes, and the middle one matters: a module with an interface port is
+reported as a fact about the module rather than as something to fix, because
+there is nothing to fix. `ok` and `ERR` are the real verdicts.
+
+This also runs automatically before every hardening run, so a design that
+cannot get past synthesis says so in a second rather than at minute forty.
+
+Without pyslang it falls back to `scripts/slang_lint.py`, a regex pass over the
+RTL that needs nothing installed. That catches the two failures that actually
+happened here -- use-before-declaration and mixed blocking/nonblocking
+assignment -- and nothing else. If pyslang installs, believe pyslang.
+
+One thing the local check cannot see: the SRAM macro's own Verilog view lives
+in the PDK. With no PDK here, a reference to it is reported as assumed rather
+than as an error. Pass `-r <pdk-root>` to check it for real.
+
 ### Which modules can be a top-level design
 
 Of the 21 modules `list` reports, **nine cannot be synthesised on their own**,
@@ -570,6 +605,8 @@ get for free.
 | `PLAYBOOK.md` | portable notes for building this flow again in another repo |
 | `CLAUDE-rtl2gds.md` | the same as rules and error signatures; drop in as `CLAUDE.md` |
 | `scripts/report.py` | digest a run: what each step changed, errors, slowest steps |
+| `scripts/slang_check.py` | runs the real Slang front end locally, via pyslang |
+| `scripts/slang_lint.py` | the same two checks by regex, when pyslang is absent |
 | `build/errors.log` | written by the flow: every failure's cause, in one place |
 | `prepare.sh` | only if nanoHUB has no outbound network — lowers the RTL locally in the CSE148 container and tars up what to upload |
 

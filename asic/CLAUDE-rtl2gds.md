@@ -19,6 +19,7 @@ decides. When they disagree, this one wins.
 11. A module with an interface port CANNOT be a top-level design. Check which modules are interface-free BEFORE planning per-module runs.
 12. Never report success from a file's existence. `--to <step>` writes `state_out.json` for steps that ran before the failure. Gate on a metric only the wanted step produces.
 13. Append every failure's cause to one `errors.log` as it happens, and roll them up at the end.
+14. `pip install pyslang` and run the real front end LOCALLY before any remote run. Build the check on the SAME file list the config generator emits — share the function, never re-derive it.
 
 ## ERROR SIGNATURES → CAUSE → FIX
 
@@ -34,6 +35,8 @@ decides. When they disagree, this one wins.
 | `top-level module 'X' has unconnected interface port 'y'` | X's ports are SystemVerilog interfaces; nothing binds them when X is top. Not a bug — no front end can do this | do not harden X alone. Use `SYNTH_KEEP_HIERARCHY_MODULES` on its parent to get its area |
 | `<sig> used before its declaration` / `note: declared here` below the use | Slang enforces declare-before-use; Verilator does not | move the declaration above the first reference. Pure reordering |
 | `cannot mix blocking and nonblocking assignments` | one variable written `=` in the reset branch and `<=` elsewhere in the same `always_ff` | make them agree. Re-run the simulation: it should be cycle-identical |
+| `BLKLOOPINIT: Unsupported: Delayed assignment to array inside for loops` (Verilator, right after fixing the above) | Verilator refuses `<=` to an unpacked array element in a loop it cannot unroll, which is what the Slang fix produces. The two tools contradict each other on that line | neither form: clear the whole table at once, `tbl <= '{default: '0};`. Only loops past `--unroll-count` need it |
+| `unknown interface 'X'` when hardening a module that does not use module Y | X is defined inside Y's file; a file-selection rule keyed on modules drops it | include a file when it defines an interface the design names, not only when it owns a needed module |
 | every design reports ok but each log ends in `ERROR` | success was inferred from a file that a truncated run also writes | gate on a metric, not a path |
 | flow and PDK from different install trees | six versions coexist under `/apps/share64/*/librelane/` | match them; `$PDK_ROOT` says which the environment intends |
 
@@ -113,6 +116,10 @@ writes `final/`. Normal.
 - `"${arr[@]}"` on an empty array errors under `set -u` in bash < 4.4. Use
   `${arr[@]+"${arr[@]}"}`.
 - `grep -oP` fails on some locales. Use `sed` + BRE.
+- A DPI prototype (`import "DPI-C" function void f(...);`) names a function and
+  never closes one. Any begin/end or function/endfunction depth counter that
+  does not skip `import`/`export` lines gets stuck and silently passes
+  everything below.
 - Adding a fourth guessed path? Stop and `find` instead.
 - Authoring on Windows: commit `.gitattributes` with `*.sh text eol=lf`, or the
   shebang arrives as `^M` and Linux reports `bad interpreter`.

@@ -192,7 +192,7 @@ module branch_predictor_gshare (
         begin
             global_history <= '0;
             for (int i = 0; i < TABLE_SIZE; i++) begin
-                counters[i] = 2'b01; // Initialize all counters to weakly not taken
+                counters[i] <= 2'b01; // Initialize all counters to weakly not taken
             end
         end
         else

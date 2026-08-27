@@ -336,12 +336,12 @@ module statistical_corrector (
 		begin
 			thres <= 9'd20;
 			tc <= '0;
-			for (int i = 0; i < BENT; i++)
-				bias_p[i] = '0;
-			for (int i = 0; i < 2 * BENT; i++)
-				bias_pt[i] = '0;
-			for (int i = 0; i < 8 * BENT; i++)
-				bias_ptc[i] = '0;
+			// Cleared whole rather than entry by entry: these three tables are
+			// past Verilator's unroll limit, and a delayed assignment to an
+			// unpacked array element inside a for loop is unsupported above it.
+			bias_p   <= '{default: '0};
+			bias_pt  <= '{default: '0};
+			bias_ptc <= '{default: '0};
 			for (int b = 0; b < NG; b++)
 				for (int i = 0; i < ENT; i++)
 					g_tab[b][i] = '0;
@@ -353,11 +353,11 @@ module statistical_corrector (
 					l_tab[b][i] = '0;
 			for (int i = 0; i < LENT; i++)
 			begin
-				lht_spec[i] = '0;
-				lht_arch[i] = '0;
+				lht_spec[i] <= '0;
+				lht_arch[i] <= '0;
 			end
 			for (int i = 0; i < CKPT; i++)
-				ck_sum[i] = '0;
+				ck_sum[i] <= '0;
 		end
 		else
 		begin

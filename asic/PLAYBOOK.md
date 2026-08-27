@@ -92,6 +92,22 @@ it beats sv2v, beyond not needing a binary that will not run:
 Keep an sv2v path as a fallback for a LibreLane built without the plugin, but
 default to Slang.
 
+### Run the front end locally first
+
+**`pip install pyslang`.** Slang is on PyPI, and the elaboration LibreLane does
+in step 5 of 80 takes about a second per design locally. Everything in the next
+section was found on a remote machine, one failure per round trip, before it
+occurred to anyone to ask whether the front end could be run here. It can.
+
+Build the check against **the same file list** the config generator produces —
+share the function, do not re-derive it. A check of a different file list is a
+check of something other than what will run, and it will disagree with the real
+run in both directions.
+
+Two things a local check cannot see, and should say so about rather than fail
+on: macro Verilog views that live in the PDK, and anything downstream of
+elaboration. Everything else it sees exactly.
+
 ### Slang is stricter than Verilator, and that is the point
 
 Expect a design that has only ever been simulated to fail its first Slang run.
@@ -101,7 +117,16 @@ On one real core, three constructs that Verilator waves through were rejected:
   declared twenty lines below it. Two instances. Pure reordering to fix.
 - **mixing blocking and nonblocking assignments to one variable** inside a
   single `always_ff` — reset cleared a table with `=`, everything else wrote it
-  with `<=`. Illegal SystemVerilog; Verilator does not care.
+  with `<=`. Illegal SystemVerilog; Verilator does not care. There were 26 of
+  these in one core, every one an array clear in a reset loop.
+
+  **This one has a trap.** Verilator rejects a *nonblocking* assignment to an
+  unpacked array element inside a `for` loop it cannot unroll (`BLKLOOPINIT`) —
+  which is exactly what the fix produces. Slang demands `<=` on that line and
+  Verilator refuses it. The way out is neither: clear the whole array in one
+  aggregate assignment, `tbl <= '{default: '0};`, which both accept and which
+  describes a reset better anyway. Only the tables past the unroll limit need
+  it — four of the twenty-six here.
 - **a top-level module with an interface port** — see below. Not a bug at all.
 
 Budget a pass for these. They are cheap individually and each one blocks a whole

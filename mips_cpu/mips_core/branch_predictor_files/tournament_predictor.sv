@@ -195,9 +195,9 @@ module tournament_predictor (
 			for (int i = 0; i < BP_TABLES; i++)
 			begin
 				for (int j = 0; j < WEIGHTS; j++)
-					weights[i][j] = '0;
-				gshare_ctr[i] = 2'b01;		// weakly not taken
-				chooser[i] = 2'b01;			// weakly trust the perceptron
+					weights[i][j] <= '0;
+				gshare_ctr[i] <= 2'b01;		// weakly not taken
+				chooser[i] <= 2'b01;			// weakly trust the perceptron
 			end
 		end
 		else

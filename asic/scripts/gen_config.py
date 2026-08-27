@@ -39,6 +39,50 @@ def parse_modules(path):
     return out
 
 
+def parse_interface_files(paths):
+    """interface -> the file defining it.
+
+    Most of this design's interfaces live in files that hold nothing else, and
+    those land in `support` below and are always included. But a few --
+    d_cache_input_ifc in d_cache.sv, alu_input_ifc in alu.sv -- sit in a file
+    that also holds a module, and that file is only included when the module is
+    needed. A design that uses the interface without using the module then
+    elaborates against nothing: `unknown interface 'd_cache_input_ifc'`.
+    """
+    out = {}
+    for path in paths:
+        src = open(path, encoding="utf-8", errors="replace").read()
+        src = re.sub(r"/\*.*?\*/", " ", src, flags=re.S)
+        src = re.sub(r"//[^\n]*", " ", src)
+        for m in re.finditer(r"^[ \t]*interface\s+(\w+)\b", src, flags=re.M):
+            out.setdefault(m.group(1), path)
+    return out
+
+
+def interfaces_used(bodies, ifcs):
+    """Every interface named by any of these sources, transitively.
+
+    An interface port reads `d_cache_input_ifc.out dc_in`, so the name is
+    always followed by a dot. Interfaces can name other interfaces, so this
+    runs to a fixpoint.
+    """
+    need, seen = set(), set()
+    pending = list(bodies)
+    while pending:
+        body = pending.pop()
+        for name in ifcs:
+            if name in need:
+                continue
+            if re.search(r"\b" + re.escape(name) + r"\s*\.", body):
+                need.add(name)
+                path = ifcs[name]
+                if path not in seen:
+                    seen.add(path)
+                    pending.append(open(path, encoding="utf-8",
+                                        errors="replace").read())
+    return need
+
+
 def parse_module_files(paths):
     """(module -> (source, body), module -> file, files with no module in them).
 
@@ -102,6 +146,32 @@ def subtree(name, mods, cut):
         need.add(n)
         stack.extend(children(n, mods))
     return need
+
+
+def slang_files(sv_files, need, mods, owner, support, ifcs):
+    """The sources a Slang run of this design needs, in the order given.
+
+    Three things go in: every file that holds no module at all (the package and
+    the interface collections), the file owning each module the design still
+    needs, and the file defining each interface those modules name. Files whose
+    only modules were cut out are dropped, which is what stops a parent
+    re-elaborating a subtree it is placing as a hard macro.
+    """
+    want = set()
+    for n in need:
+        if n in owner:
+            want.add(owner[n])
+    bodies = [mods[n][0] for n in need if n in mods]
+    for name in interfaces_used(bodies, ifcs):
+        want.add(ifcs[name])
+    out, seen = [], set()
+    for f in sv_files:
+        if f in seen:
+            continue
+        if f in support or f in want:
+            seen.add(f)
+            out.append(os.path.abspath(f))
+    return out
 
 
 def reaches_sram(names, mods):
@@ -281,13 +351,8 @@ def main():
         # because that is exactly what those support files are. Files whose
         # only modules were cut out are dropped, which is what stops the parent
         # re-elaborating a subtree it is placing as a macro.
-        files, seen = [], set()
-        for f in a.sv_file:
-            if f in seen:
-                continue
-            if f in support or any(owner.get(n) == f for n in need):
-                seen.add(f)
-                files.append(os.path.abspath(f))
+        files = slang_files(a.sv_file, need, mods, owner, support,
+                            parse_interface_files(a.sv_file))
     else:
         # Write just the modules this design still needs. Handing LibreLane the
         # whole flattened file would re-elaborate the very subtrees we hardened.

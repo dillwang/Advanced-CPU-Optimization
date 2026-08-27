@@ -523,8 +523,8 @@ module tage_m1 (
 					end
 			for (int i = 0; i < CKPT; i++)
 			begin
-				ck_phrt[i] = '0;
-				ck_phrb[i] = '0;
+				ck_phrt[i] <= '0;
+				ck_phrb[i] <= '0;
 			end
 		end
 		else

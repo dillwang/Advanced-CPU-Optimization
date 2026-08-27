@@ -377,7 +377,7 @@ module tage_predictor (
 			// writes them on this edge, which is what keeps the reset loops
 			// inside the simulator's unrolling budget.
 			for (int i = 0; i < BP_TABLES; i++)
-				base_ctr[i] = 2'b01;
+				base_ctr[i] <= 2'b01;
 			for (int t = 0; t < NT; t++)
 				for (int i = 0; i < TENT; i++)
 				begin

@@ -59,6 +59,7 @@ JOBS="$( { command -v nproc >/dev/null && nproc; } || echo 1 )"
 FETCH_SV2V=0
 SYNTH_ONLY=0
 KEEP_MODS=""
+CHECK_TOPS=""
 DRY=0
 RESUME=0
 FROM_STEP=""
@@ -87,6 +88,9 @@ usage() {
 	cat <<'OPT'
 Options:
   -p, --period NS      target clock period          (default 10 ns = 100 MHz)
+  (targets: check [MOD...] elaborates with the real Slang front end locally,
+   which needs `pip install pyslang`; without it, a regex lint that needs
+   nothing. Runs automatically before every hardening run.)
   -u, --util PCT       core utilisation             (default 40)
   -k, --pdk NAME       PDK                          (default sky130A)
   -s, --scl NAME       standard cell library        (default sky130_fd_sc_hd)
@@ -554,6 +558,32 @@ modules() {
 	"$PY" "$HERE/scripts/gen_config.py" --list-modules "${src[@]}"
 }
 block_list()   { modules | grep -vx 'mips_core'; }
+
+# Read the RTL the way LibreLane will, before handing it to LibreLane. Slang
+# is on PyPI as pyslang, so the elaboration that decides a run's first five
+# minutes can happen here in one second per design. Falls back to the regex
+# lint, which needs nothing installed and catches the two failures that have
+# actually happened.
+do_check() {
+	front
+	local src=() args=()
+	while IFS= read -r line; do src+=("$line"); done < <(src_args)
+	if [ "$FRONTEND" != slang ]; then
+		warn "check only applies to the slang frontend"
+		return 0
+	fi
+	[ -f "$HERE/src/sram_sky130.v" ] &&
+		args+=(--sram-verilog "$HERE/src/sram_sky130.v")
+	[ -n "$PDK_ROOT" ] && args+=(--pdk-root "$PDK_ROOT" --pdk "$PDK")
+	if "$PY" -c 'import pyslang' 2>/dev/null; then
+		say "elaborating every design with slang $("$PY" -c 'import pyslang; print(pyslang.VersionInfo.getMajor())' 2>/dev/null)"
+		"$PY" "$HERE/scripts/slang_check.py" "${src[@]}" 			${args[@]+"${args[@]}"} ${CHECK_TOPS:+$CHECK_TOPS}
+		return $?
+	fi
+	warn "pyslang is not installed, so this is the regex lint, not the real
+     front end. For the real thing: pip install pyslang"
+	"$PY" "$HERE/scripts/slang_lint.py" "${SV_FILES[@]}"
+}
 
 do_list() {
 	front
@@ -1099,6 +1129,13 @@ main() {
 	rm -rf "$FAILDIR"; rm -f "$ERRLOG"
 	case "${TARGETS[0]}" in
 		list|--list) do_list; exit 0 ;;
+		check|lint)
+			# Needs no flow and no PDK, so do not go looking for either.
+			find_pdk 2>/dev/null || true
+			local t
+			for t in "${TARGETS[@]:1}"; do CHECK_TOPS="$CHECK_TOPS --top $t"; done
+			do_check
+			exit $? ;;
 		report)
 			# No tool needed: this only reads a run directory.
 			local m="${TARGETS[1]:-}"
@@ -1140,6 +1177,21 @@ main() {
 			            want+=("$t") ;;
 		esac
 	done
+
+	# Each Slang refusal is a guaranteed death in step 5 of 80, which on a core
+	# run is an hour in. The check costs about a second per design.
+	if [ "$FRONTEND" = slang ] && [ "$DRY" = 0 ]; then
+		CHECK_TOPS=""
+		for m in "${want[@]}"; do CHECK_TOPS="$CHECK_TOPS --top $m"; done
+		if ! do_check > "$BUILD/check.txt" 2>&1; then
+			sed 's/^/    /' "$BUILD/check.txt"
+			warn "the designs marked above will not get past synthesis."
+			warn "a design that cannot be a top-level design is not a defect --
+     it has interface ports, and nothing can bind those when it is the top.
+     Use --keep on its parent to get its area instead."
+		fi
+		CHECK_TOPS=""
+	fi
 
 	say "hardening: ${want[*]}"
 	say "constraint: ${PERIOD} ns period, ${UTIL}% utilisation, tag $TAG"

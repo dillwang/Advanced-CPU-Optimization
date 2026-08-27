@@ -243,6 +243,9 @@ module d_cache #(
     // A refill beat owns the data banks' single write port for that cycle, so a
     // store cannot commit its word at the same time. Loads are unaffected; they
     // use the read port.
+    // Declared here rather than beside its assign further down, because
+    // bank_write_busy reads it and a reference has to follow the declaration.
+    logic rd_valid;
     logic bank_write_busy;
     assign bank_write_busy = rd_valid;
 
@@ -407,7 +410,6 @@ module d_cache #(
     logic pf_fill;
     assign pf_fill = (m_count != 0) && m_valid[m_head] && m_pf[m_head];
 
-    logic rd_valid;
     logic [`DATA_WIDTH - 1 : 0] rd_data;
     assign rd_valid = pf_fill ? 1'b1
         : (fill_port ? mem_read_data_b.RVALID : mem_read_data.RVALID);
@@ -552,7 +554,7 @@ module d_cache #(
             // edge. Seeding with the identity gives a valid permutation.
             for (int i = 0; i < ASSOCIATIVITY; i++)
                 for (int j = 0; j < DEPTH; j++)
-                    lru_age[i][j] = WAY_W'(i);
+                    lru_age[i][j] <= WAY_W'(i);
             m_valid <= '0;
             m_head <= '0;
             m_send <= '0;
@@ -563,8 +565,8 @@ module d_cache #(
             fill_beat <= '0;
             for (int i = 0; i < NUM_MSHR; i++)
             begin
-                m_port[i] = 1'b0;
-                m_pf[i] = 1'b0;
+                m_port[i] <= 1'b0;
+                m_pf[i] <= 1'b0;
             end
             f_head <= '0;
             f_send <= '0;
