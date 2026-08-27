@@ -15,6 +15,7 @@
 #   ./rtl2gds.sh core                 # the whole CPU, flat, SRAM macros and all
 #   ./rtl2gds.sh hier                 # the whole CPU, bottom up, blocks as macros
 #   ./rtl2gds.sh pdk-report           # um^2 per bit: SRAM macro vs flip-flop
+#   ./rtl2gds.sh report <module>      # digest a run: slow steps, metrics, errors
 #
 # The flow runs in six stages and this script drives all of them:
 #
@@ -992,6 +993,17 @@ main() {
 	mkdir -p "$BUILD" "$WORK" "$RESULTS"
 	case "${TARGETS[0]}" in
 		list|--list) do_list; exit 0 ;;
+		report)
+			# No tool needed: this only reads a run directory.
+			local m="${TARGETS[1]:-}"
+			if [ -z "$m" ]; then
+				m="$(ls -1dt "$WORK"/*/runs 2>/dev/null | head -1)"
+				m="$(basename "$(dirname "${m:-}")" 2>/dev/null)"
+			fi
+			[ -n "$m" ] && [ -d "$WORK/$m" ] || die "report: which design? try
+     ./rtl2gds.sh report prf"
+			"$PY" "$HERE/scripts/report.py" "$WORK/$m"
+			exit 0 ;;
 		pdk-report)
 			find_pdk
 			[ -n "$PDK_ROOT" ] || die "pdk-report needs a PDK; pass -r"
