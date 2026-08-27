@@ -21,6 +21,55 @@ Results land in `asic/results/<module>/` — GDS, DEF, gate-level netlist, SPEF
 and `metrics.json` — and the script prints a table of area, cell count, slack
 and violation counts at the end.
 
+## Getting a shell that can actually run LibreLane on nanoHUB
+
+This took longer to work out than the flow did, so it is written down.
+
+nanoHUB runs LibreLane 3 inside **bubblewrap**, not as a command on `PATH`.
+`/apps/share64/rocky8/librelane/librelane-3.0.4/start` binds the install's own
+`nix` directory over `/nix` and drops you in a devshell. Outside that namespace
+the package is findable but useless: every dependency it imports resolves
+through `/nix/store` paths that only exist inside the wrapper, so you get
+`ModuleNotFoundError: No module named 'click'` from a package that is plainly
+sitting right there.
+
+The working sequence, first time:
+
+```
+mkdir -p ~/LIBRELANE/.nix-librelane     # the empty root start binds as /
+git clone https://github.com/dillwang/Advanced-CPU-Optimization.git
+/apps/share64/rocky8/librelane/librelane-3.0.4/start
+cd ~/Advanced-CPU-Optimization/asic
+./rtl2gds.sh --synth-only prf
+```
+
+`.nix-librelane` has to exist before `start` will run; nothing creates it on a
+fresh account, and `start`'s own `collectBinds` explains why it wants one --
+"we cannot bind / to / without running into a lot of trouble, therefore we need
+to collect all top level directories and bind them inside an empty root."
+
+**Git does not work inside the devshell.** Pull outside, then re-enter:
+
+```
+exit
+cd ~/Advanced-CPU-Optimization && git pull
+/apps/share64/rocky8/librelane/librelane-3.0.4/start
+cd ~/Advanced-CPU-Optimization/asic && ./rtl2gds.sh ...
+```
+
+Things that look like the entry point and are not:
+
+| | |
+| --- | --- |
+| `/apps/librelane/r8/bin` | first on `PATH`, but holds `startCode`, `startLibrelane`, `startXterm`, `toolmenu` -- nanoHUB session launchers, no CLI |
+| `~/LIBRELANE` | the container's root filesystem, not a checkout |
+| the six trees under `/apps/share64/*/librelane/` | rhel8 and rocky8 copies of 2.4.6, 3.0.4, two 3.1.0 dev builds and a dated dev build. `PDK_ROOT` says which one the environment intends |
+| `/usr/bin/python3` | 3.6, which cannot import librelane at all -- `importlib.metadata` needs 3.8. The Nix install ships its own |
+| sv2v release binaries | linked against glibc 2.29-2.34; nanoHUB is Rocky 8 at 2.28. Use `--frontend slang`, which is the default and does not need sv2v |
+
+`rtl2gds.sh` detects all of this and prints the two commands that work, so if
+you land in the wrong shell it will say so rather than failing three steps in.
+
 ## Which flow, and which node
 
 **LibreLane, not OpenLane.** nanoHUB carries both. Its
