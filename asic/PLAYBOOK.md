@@ -5,6 +5,10 @@ an RTL-to-GDS flow. Everything here was paid for in round trips on a real
 nanoHUB session; none of it is guessable from the outside, and several items
 contradict what a reasonable person would assume.
 
+There is a second file beside this one, `CLAUDE-rtl2gds.md`: the same knowledge
+as rules, error signatures and commands rather than prose. Drop that one in as
+`CLAUDE.md` so it loads every session; read this one when you want the why.
+
 Read the whole thing first. The single biggest time sink below is not the flow,
 it is getting a shell that can run the flow at all.
 

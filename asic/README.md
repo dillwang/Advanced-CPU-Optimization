@@ -506,6 +506,7 @@ get for free.
 | `scripts/hier_order.py` | topological order for a hierarchical run |
 | `scripts/pdk_report.py` | measures um^2 per bit out of the installed PDK |
 | `PLAYBOOK.md` | portable notes for building this flow again in another repo |
+| `CLAUDE-rtl2gds.md` | the same as rules and error signatures; drop in as `CLAUDE.md` |
 | `scripts/report.py` | digest a run: what each step changed, errors, slowest steps |
 | `prepare.sh` | only if nanoHUB has no outbound network — lowers the RTL locally in the CSE148 container and tars up what to upload |
 
