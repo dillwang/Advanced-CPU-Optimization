@@ -505,6 +505,8 @@ get for free.
 | `scripts/gen_floorplan.py` | macro placement and die sizing, mixed macro sizes |
 | `scripts/hier_order.py` | topological order for a hierarchical run |
 | `scripts/pdk_report.py` | measures um^2 per bit out of the installed PDK |
+| `PLAYBOOK.md` | portable notes for building this flow again in another repo |
+| `scripts/report.py` | digest a run: what each step changed, errors, slowest steps |
 | `prepare.sh` | only if nanoHUB has no outbound network — lowers the RTL locally in the CSE148 container and tars up what to upload |
 
 ## If sv2v isn't there
