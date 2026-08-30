@@ -432,6 +432,20 @@ died at `unknown interface 'd_cache_input_ifc'`. Include a file when it defines
 anything the design *names*, transitively, and it stops mattering where things
 live.
 
+**The memory you can use is the session cap, not the machine.** On nanoHUB
+`/proc/meminfo` reports **377 GB** and `/sys/fs/cgroup/memory.max` says
+**6 GB** — a factor of 63. Every OOM kill in this project happened on a box
+with hundreds of gigabytes free, because the cgroup is what the killer
+enforces. Read the cgroup limit (v2 `memory.max`, then v1
+`memory/memory.limit_in_bytes`), treat a limit equal to the whole machine as
+absent, and divide *that* by the measured peak to pick `-j`.
+
+Two consequences worth planning around at 6 GB: ABC peaks near 1 GB on a
+150,000-cell block, so `-j 2` is about right and `-j 4` is not; and a flat run
+of a large top may simply not fit, which turns hierarchical hardening from a
+tractability argument into a memory one — each block is a separate process with
+its own ceiling.
+
 **Measure the PDK, do not recall it.** Read macro `SIZE` from LEF and flop
 `SIZE` from the standard cell LEF and compute µm²/bit yourself. Real sky130
 numbers, for calibration: `dfxtp_1` 20.0 µm²/bit (50.0 at 40% utilisation),

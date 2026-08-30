@@ -166,6 +166,10 @@ writes `final/`. Normal.
   that never closes and freezes a depth counter; a non-ANSI port list names
   signals before declaring them and that is legal; a `for (int i ...)` variable
   shadows a module-level signal of the same name.
+- **`/proc/meminfo` is not your memory budget.** nanoHUB reports 377 GB of
+  machine and caps the session at 6 GB (`/sys/fs/cgroup/memory.max`). The OOM
+  killer enforces the cgroup. Divide the cap, not MemTotal, by the measured
+  peak to choose `-j`. At 6 GB with ABC near 1 GB a block, that is `-j 2`.
 - `$PDK_ROOT` being exported does **not** mean you are in a shell that can run
   the flow.
 - The directory at the front of `PATH` named after the tool may hold only
