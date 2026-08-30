@@ -1051,6 +1051,16 @@ record_failure() {
 				printf 'killed -- check dmesg or run with fewer -j.
 '
 			fi
+			# A run killed during technology mapping has still printed the
+			# design size, and that is the number the whole calibration exists
+			# for. Do not let it die with the run.
+			local cells
+			cells="$(grep -hoE 'Number of cells: *[0-9]+' "$run"/[0-9]*/*.log 2>/dev/null |
+				grep -oE '[0-9]+' | sort -n | tail -1)"
+			if [ -n "$cells" ]; then
+				printf 'yosys reported %s cells before it stopped
+' "$cells"
+			fi
 		fi
 	} > "$tmp" 2>/dev/null || true
 	# One append, so concurrent recorders cannot interleave line by line.
