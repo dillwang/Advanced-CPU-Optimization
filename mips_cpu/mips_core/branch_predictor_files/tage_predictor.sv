@@ -383,9 +383,9 @@ module tage_predictor (
 			// multidimensional array is rejected; nesting it to the array's own
 			// depth is accepted, and unrolls to nothing, which keeps it under
 			// yosys-slang's 4000-iteration limit as well.
-			tg_ctr <= '{default: '{default: CTR_W'(4)}};
-			tg_tag <= '{default: '{default: '0}};
-			tg_u   <= '{default: '{default: '0}};
+			tg_ctr <= `FILL2(CTR_W'(4));
+			tg_tag <= `FILL2('0);
+			tg_u   <= `FILL2('0);
 		end
 		else
 		begin

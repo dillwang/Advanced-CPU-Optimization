@@ -192,7 +192,7 @@ module tournament_predictor (
 			// and a delayed assignment inside a loop is not supported. Nothing
 			// else writes them on this edge, so the two forms are equivalent
 			// here.
-			weights    <= '{default: '{default: '0}};
+			weights    <= `FILL2('0);
 			gshare_ctr <= '{default: 2'b01};	// weakly not taken
 			chooser    <= '{default: 2'b01};	// weakly trust the perceptron
 		end

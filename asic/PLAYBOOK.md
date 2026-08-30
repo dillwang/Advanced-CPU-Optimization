@@ -192,15 +192,40 @@ that a loop cannot satisfy together:
 | yosys-slang mixed assignment | **fails** if written `<=` elsewhere | ok | ok |
 | yosys-slang `--unroll-limit` | **fails** past 4000 | **fails** past 4000 | ok — zero iterations |
 
-Two traps in the idiom itself:
+Three traps in the idiom itself, and the first is the nastiest thing in this
+document:
 
-- **Verilator applies `'{default:}` only one level deep.** A flat
-  `'{default: '0}` on a 3-D array is rejected with *"CONST is not an unpacked
-  array, but is in an unpacked array context"*. Match the nesting to the
-  array's depth.
+- **The two tools want different literals, and no single one satisfies both.**
+
+  | form | yosys-slang | Verilator |
+  | --- | --- | --- |
+  | `'{default: X}` on N-D | fills every leaf | **rejected** — applies one level only |
+  | `'{default: '{default: X}}` | **rejected** — inner pattern hits a leaf | correct for 2-D |
+
+  They read the same LRM sentence differently and neither is wrong. Put the
+  choice behind the `VERILATOR` macro, which Verilator predefines and
+  yosys-slang does not, and give it a name so call sites stay readable:
+
+  ```systemverilog
+  `ifdef VERILATOR
+  	`define FILL2(v) '{default: '{default: v}}
+  	`define FILL3(v) '{default: '{default: '{default: v}}}
+  `else
+  	`define FILL2(v) '{default: v}
+  	`define FILL3(v) '{default: v}
+  `endif
+  ```
+
+  One dimension needs no macro; both agree there. Verify **both branches**: the
+  local pyslang check exercises the `else` arm and Verilator exercises the other,
+  so a full local pass really does cover them.
+
 - **Do not fix the unroll error by raising `--unroll-limit`.** Unrolling 24,576
   reset statements is what made one elaboration run sixteen hours without
   finishing. The whole-array form unrolls to nothing.
+- **Never begin a comment line with the word Verilator.** `// verilator ...` is
+  a metacomment, and the tool rejects any directive it does not recognise —
+  a paragraph explaining the above cost a build before this was understood.
 
 ### Validate the checker against a failure you already have
 

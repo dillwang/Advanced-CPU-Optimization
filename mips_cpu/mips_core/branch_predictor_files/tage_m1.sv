@@ -517,10 +517,10 @@ module tage_m1 (
 			// multidimensional array is rejected; nesting it to the array's own
 			// depth is accepted, and unrolls to nothing, which keeps it under
 			// yosys-slang's 4000-iteration limit as well.
-			tg_ctr <= '{default: '{default: '{default: CTR_W'(4)}}};
-			tg_tag <= '{default: '{default: '{default: '0}}};
-			tg_u   <= '{default: '{default: '{default: '0}}};
-			tg_val <= '{default: '{default: '{default: 1'b0}}};
+			tg_ctr <= `FILL3(CTR_W'(4));
+			tg_tag <= `FILL3('0);
+			tg_u   <= `FILL3('0);
+			tg_val <= `FILL3(1'b0);
 			for (int i = 0; i < CKPT; i++)
 			begin
 				ck_phrt[i] <= '0;

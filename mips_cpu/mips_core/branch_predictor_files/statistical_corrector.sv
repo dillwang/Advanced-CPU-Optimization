@@ -347,9 +347,9 @@ module statistical_corrector (
 			// multidimensional array is rejected; nesting it to the array's own
 			// depth is accepted, and unrolls to nothing, which keeps it under
 			// yosys-slang's 4000-iteration limit as well.
-			g_tab <= '{default: '{default: '0}};
-			b_tab <= '{default: '{default: '0}};
-			l_tab <= '{default: '{default: '0}};
+			g_tab <= `FILL2('0);
+			b_tab <= `FILL2('0);
+			l_tab <= `FILL2('0);
 			for (int i = 0; i < LENT; i++)
 			begin
 				lht_spec[i] <= '0;
