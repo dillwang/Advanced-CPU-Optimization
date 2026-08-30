@@ -51,13 +51,24 @@ PDK_ROOT="${PDK_ROOT:-}"
 PERIOD=10          # ns; 100 MHz is a deliberately loose starting constraint
 UTIL=40            # % core utilisation
 TAG="$(date +%Y%m%d_%H%M%S)"
-# Blocks in parallel, but not one per core: each flow spawns OpenROAD, Magic
-# and KLayout, and four large designs at once will already saturate the memory
-# on a shared node.
+# Designs in parallel, not one per core: each flow spawns OpenROAD, Magic and
+# KLayout, and the memory is what runs out first. Two, not four -- on a real run
+# of this design four concurrent jobs put two of them in the OOM killer inside
+# ABC (`return code 137`), and ABC is the memory peak of the whole flow. The
+# peak each design actually reaches is now measured and reported at the end, so
+# raise this from a number rather than from optimism.
 JOBS="$( { command -v nproc >/dev/null && nproc; } || echo 1 )"
-[ "$JOBS" -gt 4 ] && JOBS=4
+[ "$JOBS" -gt 2 ] && JOBS=2
 FETCH_SV2V=0
 SYNTH_ONLY=0
+
+# GNU time, for the peak RSS of a design's whole process tree; the shell
+# builtin cannot report it. Absent on some systems, in which case the flow
+# simply does not report memory.
+TIME_BIN=""
+for _t in /usr/bin/time /bin/time /usr/local/bin/time; do
+	[ -x "$_t" ] && { TIME_BIN="$_t"; break; }
+done
 KEEP_MODS=""
 CHECK_TOPS=""
 DRY=0
@@ -96,7 +107,9 @@ Options:
   -s, --scl NAME       standard cell library        (default sky130_fd_sc_hd)
   -r, --pdk-root PATH  PDK root                     (default: autodetected)
   -t, --tag TAG        run tag                      (default: a timestamp)
-  -j, --jobs N         parallel jobs for all-blocks (default: nproc)
+  -j, --jobs N         designs to harden at once  (default: nproc, capped at 2)
+                       Not threads inside a design, and no effect when there is
+                       only one. Peak memory multiplies by N
       --fetch-sv2v     download sv2v if it is not already here
       --synth-only     stop after Yosys; area and cell counts, no GDS
       --dry-run        print what would run, run nothing
@@ -699,12 +712,26 @@ run_flow() {
 	fargs+=(--pdk "$PDK" --scl "$SCL")
 	[ "$stop" = synth ] && fargs+=(--to Yosys.Synthesis)
 
+	# Measure the peak. %M is max RSS in kilobytes across the process and every
+	# child it waits for, which is where ABC's peak shows up. Appended, so a
+	# repair loop's attempts all land and the largest one wins.
+	local pre=()
+	[ -n "$TIME_BIN" ] && [ "$DRY" = 0 ] &&
+		pre=("$TIME_BIN" -a -o "$dir/peak.txt" -f '%M %e')
+
 	if [ "$FLOW_KIND" = openlane1 ]; then
-		run $FLOW_CMD -design "$dir" -tag "$TAG" \
+		run ${pre[@]+"${pre[@]}"} $FLOW_CMD -design "$dir" -tag "$TAG" \
 			$([ "$stop" = synth ] && echo "-to synthesis")
 	else
-		run $FLOW_CMD "${fargs[@]}" "$dir/config.json"
+		run ${pre[@]+"${pre[@]}"} $FLOW_CMD "${fargs[@]}" "$dir/config.json"
 	fi
+}
+
+# The largest %M this design reached, in kilobytes, across every attempt.
+peak_kb() {
+	local f="$WORK/$1/peak.txt"
+	[ -s "$f" ] || return 1
+	awk '$1 ~ /^[0-9]+$/ && $1 > m { m = $1 } END { if (m) print m }' "$f"
 }
 
 # True if the config declares any macros. Anything that does needs an explicit
@@ -1055,8 +1082,16 @@ json.dump(d.get("metrics", d), open(sys.argv[2], "w"), indent=2)' \
 		fi
 	fi
 
+	# Carry the peak alongside the metrics, so the summary can report it and so
+	# it survives the run directory being cleared.
+	local pk pknote=""
+	if pk="$(peak_kb "$mod")"; then
+		printf '%s\n' "$pk" > "$RESULTS/$mod/peak_kb.txt"
+		pknote="$("$PY" -c 'import sys; print(", peak %.1f GB" % (int(sys.argv[1]) / 1048576.0))' "$pk" 2>/dev/null || echo "")"
+	fi
+
 	if [ -f "$RESULTS/$mod/$mod.gds" ]; then
-		ok "$mod: $RESULTS/$mod/$mod.gds"
+		ok "$mod: $RESULTS/$mod/$mod.gds$pknote"
 	elif [ "$SYNTH_ONLY" = 1 ]; then
 		# The fallback above will happily copy the metrics of a run that died
 		# in step 2, so the presence of metrics.json proves nothing. What
@@ -1069,7 +1104,7 @@ m = m.get("metrics", m)
 v = m.get("design__instance__count")
 sys.exit(1) if v in (None, "") else print(int(v))' 			"$RESULTS/$mod/metrics.json" 2>/dev/null)" || cells=""
 		if [ -n "$cells" ]; then
-			ok "$mod: synthesis only, $cells cells, metrics in $RESULTS/$mod/metrics.json"
+			ok "$mod: synthesis only, $cells cells$pknote, metrics in $RESULTS/$mod/metrics.json"
 		else
 			warn "$mod: no synthesis result -- see $ERRLOG"
 			return 1
@@ -1086,8 +1121,47 @@ summary() {
 	if [ -d "$RESULTS" ]; then
 		say "summary"
 		summary_table
+		memory_advice
 	fi
 	failures
+}
+
+# What the runs actually cost in memory, and what that means for -j. The number
+# people guess at here is the number that put two designs in the OOM killer, so
+# print the measurement and the arithmetic instead of leaving it to judgement.
+memory_advice() {
+	local total_kb=0
+	[ -r /proc/meminfo ] &&
+		total_kb="$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || echo 0)"
+	"$PY" - "$RESULTS" "$total_kb" "$JOBS" <<'PY'
+import os, sys
+root, total_kb, jobs = sys.argv[1], int(sys.argv[2] or 0), int(sys.argv[3])
+peaks = []
+for m in sorted(os.listdir(root)):
+    p = os.path.join(root, m, "peak_kb.txt")
+    if os.path.isfile(p):
+        try:
+            peaks.append((m, int(open(p).read().strip())))
+        except Exception:
+            pass
+if not peaks:
+    sys.exit()
+peaks.sort(key=lambda x: -x[1])
+print()
+print("    peak memory per design")
+for m, kb in peaks[:6]:
+    print("        %-24s %6.2f GB" % (m, kb / 1048576.0))
+worst = peaks[0][1]
+if total_kb:
+    # Leave a quarter of the node for everything else; ABC's peak is brief but
+    # the OOM killer does not care how brief it was.
+    fits = max(1, int((total_kb * 0.75) // worst))
+    print()
+    print("    largest peak %.2f GB, node has %.1f GB -> -j %d is what fits"
+          % (worst / 1048576.0, total_kb / 1048576.0, fits))
+    if fits < jobs:
+        print("    this run used -j %d, which is more than that" % jobs)
+PY
 }
 
 # The per-design metrics table.

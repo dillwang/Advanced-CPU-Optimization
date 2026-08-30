@@ -604,6 +604,10 @@ with; and **local** GEHL banks over a per branch history of that branch's own re
 
 ### What the local family is worth
 
+Both columns are three-wide, measured against each other on the same machine,
+so the comparison stands; the absolute cycle counts are lower now. See the
+[Result](#result) table below for current numbers.
+
 | | full corrector | no local history |
 | --- | --- | --- |
 | nqueens   | **587,259** / 80.58% | 606,238 / 77.75% |
@@ -649,6 +653,26 @@ the last is ~90.6 KB, of which 29 KB is the corrector.
 | quickSort |  2,916,578 / 86.63% |  2,874,266 / 87.00% |  2,865,268 / 87.32% | **2,863,656 / 87.61%** |
 | esift2    |  3,296,052 / 98.53% |  3,306,491 / 98.42% |  3,299,695 / 98.49% |   3,296,264 / 98.53% |
 | coin      | 17,157,529 / 98.04% | 16,838,092 / 98.50% | 16,468,716 / 98.82% | **16,429,702 / 99.07%** |
+
+**Those are three-wide numbers.** The comparison between the four predictors is
+still the point of the table and is unaffected, but the machine has since gone
+four wide ([Going Four Wide](#going-four-wide-and-what-memory-actually-costs)),
+which moved every cycle count and one of the accuracies. Re-measured on the
+current machine, TAGE-M1 + SC only:
+
+| benchmark | cycles, 3-wide | cycles now | speedup | accuracy then | accuracy now |
+| --- | --- | --- | --- | --- | --- |
+| nqueens   |    587,259 |    527,256 | 1.114x | 80.58% | **80.44%** |
+| quickSort |  2,863,656 |  2,154,366 | 1.329x | 87.61% | 87.63% |
+| esift2    |  3,296,264 |  2,615,127 | 1.260x | 98.53% | 98.53% |
+| coin      | 16,429,702 | 12,836,687 | 1.280x | 99.07% | 99.07% |
+
+Three of the four accuracies are unchanged to the second decimal. **nqueens
+lost 0.14 points**, and it is the one benchmark where that is expected: a wider
+front end predicts more branches per cycle from history that has had less
+opportunity to settle, and nqueens is the benchmark whose accuracy rests on the
+local-history family being able to see a branch's own recent outcomes. It is a
+real cost of going four wide, and a small one against 1.114x.
 
 **1.027x geometric mean over the tournament predictor**, of which the corrector itself is 1.013x.
 
@@ -1333,7 +1357,8 @@ The chooser is close to a wash: it wins slightly on quickSort and loses slightly
 the perceptron on its own would have been better. gshare is the weaker component throughout.
 
 On branch `tage-sc-l` the tournament predictor is replaced, and the numbers above are the baseline
-it is measured against — nqueens goes 76.9% to **80.6%** and coin 98.0% to **99.1%**. See
+it is measured against — nqueens goes 76.9% to **80.6%** and coin 98.0% to **99.1%**, both at
+three wide. On the current four-wide machine nqueens measures **80.44%** and coin **99.07%**. See
 [Statistical Correction](#statistical-correction).
 
 All four benchmarks are checkable. If `coin.ls.txt.bz2` ever fails to decompress, the archive in

@@ -192,13 +192,9 @@ module tournament_predictor (
 			// and a delayed assignment inside a loop is not supported. Nothing
 			// else writes them on this edge, so the two forms are equivalent
 			// here.
-			for (int i = 0; i < BP_TABLES; i++)
-			begin
-				for (int j = 0; j < WEIGHTS; j++)
-					weights[i][j] <= '0;
-				gshare_ctr[i] <= 2'b01;		// weakly not taken
-				chooser[i] <= 2'b01;			// weakly trust the perceptron
-			end
+			weights    <= '{default: '{default: '0}};
+			gshare_ctr <= '{default: 2'b01};	// weakly not taken
+			chooser    <= '{default: 2'b01};	// weakly trust the perceptron
 		end
 		else
 		begin

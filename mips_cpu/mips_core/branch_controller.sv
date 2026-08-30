@@ -191,9 +191,9 @@ module branch_predictor_gshare (
         if (~rst_n)
         begin
             global_history <= '0;
-            for (int i = 0; i < TABLE_SIZE; i++) begin
-                counters[i] <= 2'b01; // Initialize all counters to weakly not taken
-            end
+            // Whole-table clear: TABLE_SIZE is 65536, far past what either
+            // Verilator or yosys-slang will unroll a reset loop over.
+            counters <= '{default: 2'b01};
         end
         else
         begin

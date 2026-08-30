@@ -587,6 +587,35 @@ you want per-module area attribution out of `Odb.CellFrequencyTables` rather tha
 one undifferentiated cell count — the cost is that the optimiser stops working
 across those boundaries, so use it to measure, not to ship.
 
+### How many designs at once
+
+`-j N` hardens N designs in parallel. It is not threads inside a design and does
+nothing when there is only one, so `-j 4 core` is `-j 1 core`. What it does
+multiply is peak memory: each job is its own Yosys and its own ABC, and **ABC is
+the memory peak of the entire flow**.
+
+That is not theoretical here. A run at the old default of 4 put `frontend` and
+`issue_queue` in the OOM killer inside ABC (`return code 137`, plus one exit 1
+with no diagnostic at all, which is what a killed process looks like) — three of
+four failures in that run were one resource problem. The default is now capped
+at **2**.
+
+Rather than leave the right number to judgement, every run now measures it. The
+flow wraps each design in GNU `time` and reports the largest resident set it
+reached, then does the arithmetic:
+
+```
+    peak memory per design
+        btb                        9.00 GB
+        prf                        2.40 GB
+
+    largest peak 9.00 GB, node has 31.1 GB -> -j 2 is what fits
+```
+
+It reserves a quarter of the node for everything else — ABC's peak is brief, but
+the OOM killer does not care how brief it was. If GNU `time` is not on the
+machine the flow simply does not report memory.
+
 ### Clock gating
 
 `--clock-gate N` sets `SYNTH_CLOCKGATE_MIN_WIDTH`, which replaces any enabled
