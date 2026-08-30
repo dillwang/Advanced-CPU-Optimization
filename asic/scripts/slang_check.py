@@ -10,14 +10,21 @@ elaboration can be done here in about a second per design:
     pip install pyslang
     ./rtl2gds.sh check            # or: python scripts/slang_check.py --all
 
-What makes this worth more than a lint is that it is not an approximation. The
-file list is the one gen_config.py hands LibreLane, in the same order, with the
-same include path and the same defines -- so an elaboration that passes here is
-the elaboration that will run there.
+The file list is the one gen_config.py hands LibreLane, in the same order, with
+the same include path and the same defines.
 
-`scripts/slang_lint.py` stays useful when pyslang is not installed: it needs
-nothing but Python, and it catches the two failures that actually happened. But
-if this runs, believe this one.
+**But passing here does not mean passing there.** LibreLane runs *yosys-slang*,
+the Yosys frontend, not plain slang, and yosys-slang refuses things slang
+accepts:
+
+  - a `for` loop of more than `--unroll-limit` iterations (default 4000)
+  - any nonblocking assignment to a variable already written blocking, which
+    slang tolerates and Verilator ignores entirely
+
+Both were met on a real design after this check reported it clean. So this
+answers "is the SystemVerilog well formed and does it elaborate", which is most
+of what kills a run, and `scripts/slang_lint.py` covers the mixed-assignment
+class that this one cannot see. Run both.
 """
 
 import argparse

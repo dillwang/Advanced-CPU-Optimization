@@ -378,13 +378,14 @@ module tage_predictor (
 			// inside the simulator's unrolling budget.
 			for (int i = 0; i < BP_TABLES; i++)
 				base_ctr[i] <= 2'b01;
-			for (int t = 0; t < NT; t++)
-				for (int i = 0; i < TENT; i++)
-				begin
-					tg_ctr[t][i] = CTR_W'(4);
-					tg_tag[t][i] = '0;
-					tg_u[t][i] = '0;
-				end
+			// One '{default:} per unpacked dimension. Verilator applies the
+			// keyword only one level deep, so a flat '{default:'0} on a
+			// multidimensional array is rejected; nesting it to the array's own
+			// depth is accepted, and unrolls to nothing, which keeps it under
+			// yosys-slang's 4000-iteration limit as well.
+			tg_ctr <= '{default: '{default: CTR_W'(4)}};
+			tg_tag <= '{default: '{default: '0}};
+			tg_u   <= '{default: '{default: '0}};
 		end
 		else
 		begin

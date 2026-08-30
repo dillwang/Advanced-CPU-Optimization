@@ -27,6 +27,9 @@ BUILTIN_TYPES = {
     "longint", "time", "real", "shortreal", "genvar", "event",
 }
 
+# One bracket group, allowing a nested one inside it: [b], [f_gi[b]], [3:0].
+BRACKET = r"\[(?:[^\[\]]|\[[^\[\]]*\])*\]"
+
 KEYWORDS = {
     "begin", "end", "if", "else", "for", "while", "case", "casex", "casez",
     "endcase", "always", "always_ff", "always_comb", "always_latch", "assign",
@@ -203,7 +206,12 @@ def mixed_assignments(lines, lo, hi):
                 seen_begin = True
             depth += len(re.findall(r"\bbegin\b", line))
             depth -= len(re.findall(r"\bend\b", line))
-            m = re.match(r"\s*([A-Za-z_]\w*)\s*(?:\[[^\]]*\]|\.\w+)*\s*(<?=)(?!=)", line)
+            # An index can itself be an indexed expression -- g_tab[b][f_gi[b]]
+            # -- so a bracket group has to allow one level of nesting. With
+            # [^\]]* this missed every 2-D table in the design, which is
+            # exactly where the mixed assignments were.
+            m = re.match(r"\s*([A-Za-z_]\w*)\s*(?:" + BRACKET + r"|\.\w+)*\s*(<?=)(?!=)",
+                         line)
             if m and m.group(1) not in KEYWORDS:
                 (nonblocking if m.group(2) == "<=" else blocking)[m.group(1)] = i
             i += 1

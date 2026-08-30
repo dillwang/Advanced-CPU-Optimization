@@ -67,6 +67,11 @@ lint. Never emit `pip install` as advice on a machine without pip.
 | `<sig> used before its declaration` / `note: declared here` below the use | Slang enforces declare-before-use; Verilator does not | move the declaration above the first reference. Pure reordering |
 | `cannot mix blocking and nonblocking assignments` | one variable written `=` in the reset branch and `<=` elsewhere in the same `always_ff` | make them agree. Re-run the simulation: it should be cycle-identical |
 | `BLKLOOPINIT: Unsupported: Delayed assignment to array inside for loops` (Verilator, right after fixing the above) | Verilator refuses `<=` to an unpacked array element in a loop it cannot unroll, which is what the Slang fix produces. The two tools contradict each other on that line | neither form: clear the whole table at once, `tbl <= '{default: '0};`. Only loops past `--unroll-count` need it |
+| `unroll limit of 4000 exhausted [--unroll-limit=]` | **yosys-slang**, not slang. A reset loop over a table with more iterations than that | whole-array assignment (zero iterations). Do NOT just raise the limit — unrolling 24k statements is what made one elaboration run 16 h without finishing |
+| `non-blocking assignment to variable 'X' is not supported after previous blocking assignment` | yosys-slang refusing what plain slang tolerates | same whole-array clear; it fixes the unroll limit and this together |
+| `Item is incompatible with the array type` / `CONST is not an unpacked array, but is in an unpacked array context` | Verilator applies `'{default:}` only ONE level deep, and the array has more dimensions | nest one `'{default:}` per unpacked dimension: 3-D wants `'{default: '{default: '{default: X}}}` |
+| ABC `return code 137` (often with `The network is combinational`) | 128+9 = SIGKILL. The OOM killer took ABC; the message is noise printed on the way down | lower `-j`. Peak memory is per concurrent design and ABC is the peak |
+| a design fails with exit 1 and NO error line in any log | a killed process prints nothing | same as above; and make the failure recorder print a log tail rather than an empty cause |
 | `unknown interface 'X'` when hardening a module that does not use module Y | X is defined inside Y's file; a file-selection rule keyed on modules drops it | include a file when it defines an interface the design names, not only when it owns a needed module |
 | every design reports ok but each log ends in `ERROR` | success was inferred from a file that a truncated run also writes | gate on a metric, not a path |
 | flow and PDK from different install trees | six versions coexist under `/apps/share64/*/librelane/` | match them; `$PDK_ROOT` says which the environment intends |
@@ -137,10 +142,23 @@ writes `final/`. Normal.
 - A multi-ported register file **cannot** be SRAM. Async read alone rules it
   out. Measured: a 128×32 PRF with 8 async reads + 5 writes was 581,694 µm², of
   which the flops were 87,123 (15%) — the mux network is 85%.
+- **`pyslang` is NOT `yosys-slang`.** LibreLane runs the Yosys frontend, which
+  refuses things plain slang accepts: loops past `--unroll-limit` (4000), and
+  any nonblocking assignment to a variable already written blocking. A design
+  can pass `./rtl2gds.sh check` clean and still die at step 5. The local check
+  covers conformance and elaboration; the regex lint covers mixed assignment;
+  nothing local covers the unroll limit.
 - Slang requires `<=` where a variable is written nonblocking elsewhere in the
   same `always_ff`; Verilator then rejects `<=` to an unpacked array element in
   a loop it cannot unroll. **The two tools contradict each other on that exact
-  line.** The resolution is neither form: `tbl <= '{default: '0};`.
+  line.** The resolution is neither form: a whole-array assignment.
+- **Reset a table with one whole-array assignment, always — not a loop.** It
+  satisfies Verilator's BLKLOOPINIT, yosys-slang's unroll limit and the
+  mixed-assignment rule at once, and it is the only form that scales. Nest one
+  `'{default:}` per unpacked dimension.
+- A regex over SystemVerilog must allow **nested** bracket groups:
+  `g_tab[b][f_gi[b]]`. `\[[^\]]*\]` silently misses every multidimensional
+  table, which is exactly where the interesting bugs are.
 - A regex checker over SystemVerilog goes SILENT, not loud, when it is wrong.
   Specific ways: a DPI prototype (`import "DPI-C" function ...;`) opens a scope
   that never closes and freezes a depth counter; a non-ANSI port list names

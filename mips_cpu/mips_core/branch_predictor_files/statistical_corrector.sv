@@ -342,15 +342,14 @@ module statistical_corrector (
 			bias_p   <= '{default: '0};
 			bias_pt  <= '{default: '0};
 			bias_ptc <= '{default: '0};
-			for (int b = 0; b < NG; b++)
-				for (int i = 0; i < ENT; i++)
-					g_tab[b][i] = '0;
-			for (int b = 0; b < NB; b++)
-				for (int i = 0; i < ENT; i++)
-					b_tab[b][i] = '0;
-			for (int b = 0; b < NL; b++)
-				for (int i = 0; i < ENT; i++)
-					l_tab[b][i] = '0;
+			// One '{default:} per unpacked dimension. Verilator applies the
+			// keyword only one level deep, so a flat '{default:'0} on a
+			// multidimensional array is rejected; nesting it to the array's own
+			// depth is accepted, and unrolls to nothing, which keeps it under
+			// yosys-slang's 4000-iteration limit as well.
+			g_tab <= '{default: '{default: '0}};
+			b_tab <= '{default: '{default: '0}};
+			l_tab <= '{default: '{default: '0}};
 			for (int i = 0; i < LENT; i++)
 			begin
 				lht_spec[i] <= '0;

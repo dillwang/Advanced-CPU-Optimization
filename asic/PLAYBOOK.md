@@ -114,7 +114,7 @@ one above it cannot see:
 
 | | cost | catches |
 | --- | --- | --- |
-| `slang` (via pyslang) on each design | **~1 s each** | what the synthesis front end will refuse: conformance, elaboration, missing modules and interfaces |
+| `slang` (via pyslang) on each design | **~1 s each** | conformance, elaboration, missing modules and interfaces — but see the caveat below: this is *not* the same tool the flow runs |
 | `verilator --lint-only` | **~3 s** | what the simulator will refuse: `BLKLOOPINIT`, `BLKANDNBLK`, width and case warnings |
 | `verilate` + every benchmark | **~10 min** | whether it is still correct, and what it costs in cycles |
 
@@ -154,6 +154,47 @@ the real run in both directions.
 Two things a local Slang check cannot see, and should report as unchecked
 rather than fail on: macro Verilog views that live in the PDK, and anything
 downstream of elaboration.
+
+**And one it will get wrong.** LibreLane does not run slang; it runs
+**yosys-slang**, the Yosys frontend, which refuses things plain slang accepts:
+
+- a `for` loop of more than `--unroll-limit` iterations, default **4000**
+- any nonblocking assignment to a variable already written blocking — which
+  slang tolerates and Verilator ignores entirely
+
+A design can come back clean from the local check and still die at step 5 on
+both counts. That happened here after this section was first written. Treat the
+pyslang check as "is the SystemVerilog well formed and does it elaborate",
+which is most of what kills a run, and keep the regex lint for the
+mixed-assignment class it cannot see.
+
+### Reset a table with one assignment, never a loop
+
+This is the single most useful RTL idiom in this document, and it took three
+separate tool failures to arrive at:
+
+```systemverilog
+tg_ctr <= '{default: '{default: '{default: CTR_W'(4)}}};
+```
+
+One `'{default:}` per unpacked dimension. It satisfies all three constraints
+that a loop cannot satisfy together:
+
+| | a loop of `=` | a loop of `<=` | whole-array `'{default:}` |
+| --- | --- | --- | --- |
+| Verilator `BLKLOOPINIT` | ok | **fails** past `--unroll-count` | ok |
+| yosys-slang mixed assignment | **fails** if written `<=` elsewhere | ok | ok |
+| yosys-slang `--unroll-limit` | **fails** past 4000 | **fails** past 4000 | ok — zero iterations |
+
+Two traps in the idiom itself:
+
+- **Verilator applies `'{default:}` only one level deep.** A flat
+  `'{default: '0}` on a 3-D array is rejected with *"CONST is not an unpacked
+  array, but is in an unpacked array context"*. Match the nesting to the
+  array's depth.
+- **Do not fix the unroll error by raising `--unroll-limit`.** Unrolling 24,576
+  reset statements is what made one elaboration run sixteen hours without
+  finishing. The whole-array form unrolls to nothing.
 
 ### Validate the checker against a failure you already have
 

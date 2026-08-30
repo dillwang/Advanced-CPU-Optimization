@@ -992,8 +992,26 @@ record_failure() {
 			# The tools do not agree on a format and LibreLane re-prints the
 			# tail of any log it is unhappy about, so match loosely, strip the
 			# indent it adds, and drop the repeats.
-			grep -hE '(error|ERROR|Error|FATAL|fatal):' 				"$run"/[0-9]*/*.log 2>/dev/null |
-				sed 's/^[[:space:]]*//' | awk '!seen[$0]++' | head -30
+			local hits
+			hits="$(grep -hE '(error|ERROR|Error|FATAL|fatal):' 				"$run"/[0-9]*/*.log 2>/dev/null |
+				sed 's/^[[:space:]]*//' | awk '!seen[$0]++' | head -30)"
+			if [ -n "$hits" ]; then
+				printf '%s
+' "$hits"
+			else
+				# Nothing matched. That is not "no cause" -- a tool killed by
+				# the OOM killer prints nothing at all -- so show the tail
+				# rather than record a failure with an empty explanation.
+				printf 'no error line in any log; last 15 lines of the newest one:
+'
+				local newest
+				newest="$(ls -1t "$step"*.log 2>/dev/null | head -1)"
+				[ -n "$newest" ] && tail -15 "$newest" | sed 's/^/    /'
+				printf 'exit %s with no diagnostic usually means the tool was
+' "$rc"
+				printf 'killed -- check dmesg or run with fewer -j.
+'
+			fi
 		fi
 	} > "$tmp" 2>/dev/null || true
 	# One append, so concurrent recorders cannot interleave line by line.

@@ -512,15 +512,15 @@ module tage_m1 (
 			use_alt <= 4'd8;
 			for (int i = 0; i < BP_TABLES; i++)
 				base_ctr[i] = 2'b01;
-			for (int t = 0; t < NT; t++)
-				for (int i = 0; i < SETS; i++)
-					for (int w = 0; w < WAYS; w++)
-					begin
-						tg_ctr[t][i][w] = CTR_W'(4);
-						tg_tag[t][i][w] = '0;
-						tg_u[t][i][w] = '0;
-						tg_val[t][i][w] = 1'b0;
-					end
+			// One '{default:} per unpacked dimension. Verilator applies the
+			// keyword only one level deep, so a flat '{default:'0} on a
+			// multidimensional array is rejected; nesting it to the array's own
+			// depth is accepted, and unrolls to nothing, which keeps it under
+			// yosys-slang's 4000-iteration limit as well.
+			tg_ctr <= '{default: '{default: '{default: CTR_W'(4)}}};
+			tg_tag <= '{default: '{default: '{default: '0}}};
+			tg_u   <= '{default: '{default: '{default: '0}}};
+			tg_val <= '{default: '{default: '{default: 1'b0}}};
 			for (int i = 0; i < CKPT; i++)
 			begin
 				ck_phrt[i] <= '0;
