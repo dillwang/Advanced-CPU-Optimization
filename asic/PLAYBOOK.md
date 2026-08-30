@@ -227,6 +227,33 @@ document:
   a metacomment, and the tool rejects any directive it does not recognise —
   a paragraph explaining the above cost a build before this was understood.
 
+### Do not parse SystemVerilog with regexes
+
+The regex check for mixed blocking/nonblocking assignment was wrong **five
+times running**, and each time it printed `0 findings` while the real tool
+failed the run:
+
+| it missed | because |
+| --- | --- |
+| `g_tab[b][f_gi[b]]` | `\[[^\]]*\]` cannot match a nested index — so it missed every multidimensional table, which is where the bugs were |
+| everything after a DPI prototype | `import "DPI-C" function ...;` opens a scope and never closes it, freezing the depth counter |
+| non-ANSI port lists | `output [7:0] x;` above `logic [7:0] x;` is legal, and reporting it drowned the real findings |
+| an assignment split across two lines | the `<=` was on the next line from its target |
+| `if (cond) x <= y;` | one statement, so the buffer began with a keyword and was skipped |
+
+Five patches, five new holes. **Ask the parser instead.** pyslang exposes the
+syntax tree: find `AlwaysFFBlock` and friends, collect `AssignmentExpression`
+against `NonblockingAssignmentExpression`, resolve each lvalue to its base
+identifier. About eighty lines, and it found the case on the first run.
+
+Check first whether the front end will just tell you — here it would not:
+`-Weverything` on the offending file reports only sign and arithmetic classes,
+which is itself the proof that mixed assignment is a yosys-slang restriction
+rather than a language rule.
+
+Keep a regex version only as the no-dependency fallback, and do not believe it
+when it says zero.
+
 ### Validate the checker against a failure you already have
 
 The regex fallback written for this project missed the exact bug that motivated

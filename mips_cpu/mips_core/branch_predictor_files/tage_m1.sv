@@ -510,8 +510,10 @@ module tage_m1 (
 			u_timer <= '0;
 			lfsr <= 8'h5A;
 			use_alt <= 4'd8;
-			for (int i = 0; i < BP_TABLES; i++)
-				base_ctr[i] = 2'b01;
+			// One dimension, so no FILL macro: both tools agree on the flat
+			// form here. It has to be nonblocking because the update path below
+			// writes base_ctr with <=, and one variable may not have both.
+			base_ctr <= '{default: 2'b01};
 			// One '{default:} per unpacked dimension. Verilator applies the
 			// keyword only one level deep, so a flat '{default:'0} on a
 			// multidimensional array is rejected; nesting it to the array's own

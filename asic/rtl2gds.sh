@@ -601,9 +601,18 @@ do_check() {
 		how="$(command -v slang)"
 	fi
 	if [ -n "$how" ]; then
+		local rc=0
 		say "elaborating with $how"
-		"$PY" "$HERE/scripts/slang_check.py" "${src[@]}" 			${args[@]+"${args[@]}"} ${CHECK_TOPS:+$CHECK_TOPS}
-		return $?
+		"$PY" "$HERE/scripts/slang_check.py" "${src[@]}" 			${args[@]+"${args[@]}"} ${CHECK_TOPS:+$CHECK_TOPS} || rc=$?
+		# Elaboration is not the whole story: yosys-slang also refuses a
+		# variable written both = and <= in one procedural block, which slang
+		# itself accepts (-Weverything reports nothing). That check reads the
+		# parse tree, because five successive regex versions of it were wrong.
+		if "$PY" -c 'import pyslang' 2>/dev/null; then
+			"$PY" "$HERE/scripts/mixed_assign.py" "${SV_FILES[@]}" ||
+				{ warn "yosys-slang refuses these; slang and Verilator do not."; rc=1; }
+		fi
+		return $rc
 	fi
 	# Do not tell someone to pip install on a machine without pip. The check is
 	# a pre-flight: the place to run it is wherever you edit the RTL.

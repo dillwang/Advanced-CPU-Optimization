@@ -49,6 +49,7 @@ lint. Never emit `pip install` as advice on a machine without pip.
 14. `pip install pyslang` and run the real front end LOCALLY before any remote run. Build the check on the SAME file list the config generator emits — share the function, never re-derive it.
 15. Select source files by what they DEFINE (modules, interfaces, packages, transitively), never by "files with no module in them". Interfaces hide in files that also hold modules.
 16. Never trust a checker you have not seen fail. Point it at a known-bad input first. Silence from a broken checker and silence from a clean design are the same output.
+16a. Do NOT regex-parse SystemVerilog for a semantic property. Five versions of the mixed-assignment check were wrong five different ways, each printing 0 findings while the run failed. Use pyslang's syntax tree: `AssignmentExpression` vs `NonblockingAssignmentExpression` under an `Always*Block`.
 16b. A tool that exited non-zero has FAILED. Never let "we could not parse an error line" upgrade that to success — report it and print the raw tail. This exact bug shipped here and was caught only because a test stub was accidentally broken.
 17. Fix every front-end finding in ONE pass. The front end reports the whole design; one local invocation gives the entire list.
 
