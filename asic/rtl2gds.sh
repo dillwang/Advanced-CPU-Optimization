@@ -1133,21 +1133,48 @@ summary() {
 # people guess at here is the number that put two designs in the OOM killer, so
 # print the measurement and the arithmetic instead of leaving it to judgement.
 memory_advice() {
-	local total_kb=0
+	# MemTotal is the wrong number on a shared node: nanoHUB reports 377 GB of
+	# machine while capping the session far below that, which is how ABC got
+	# OOM killed on a box with hundreds of gigabytes free. Prefer whatever
+	# cgroup limit is actually in force, and fall back to MemTotal only when
+	# there is none.
+	local total_kb=0 lim=""
 	[ -r /proc/meminfo ] &&
 		total_kb="$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || echo 0)"
-	"$PY" - "$RESULTS" "$total_kb" "$JOBS" <<'PY'
+	for f in /sys/fs/cgroup/memory.max 	         /sys/fs/cgroup/memory/memory.limit_in_bytes; do
+		[ -r "$f" ] || continue
+		lim="$(cat "$f" 2>/dev/null)"
+		case "$lim" in
+		''|max|*[!0-9]*) continue ;;
+		esac
+		lim=$((lim / 1024))
+		# A "limit" of the whole machine is not a limit.
+		[ "$lim" -gt 0 ] && [ "$lim" -lt "$total_kb" ] && total_kb="$lim"
+		break
+	done
+	local cores; cores="$( { command -v nproc >/dev/null && nproc; } || echo 4 )"
+	"$PY" - "$RESULTS" "$total_kb" "$JOBS" "$FAILDIR" "$cores" <<'PY'
 import os, sys
 root, total_kb, jobs = sys.argv[1], int(sys.argv[2] or 0), int(sys.argv[3])
+faildir, cores = sys.argv[4], int(sys.argv[5] or 4)
+
+# A design that died in step 1 of 80 never allocated anything, so its peak
+# describes nothing. Including one is how this reported "-j 4785 is what fits".
+failed = set(os.listdir(faildir)) if os.path.isdir(faildir) else set()
 peaks = []
 for m in sorted(os.listdir(root)):
     p = os.path.join(root, m, "peak_kb.txt")
-    if os.path.isfile(p):
-        try:
-            peaks.append((m, int(open(p).read().strip())))
-        except Exception:
-            pass
+    if m in failed or not os.path.isfile(p):
+        continue
+    try:
+        peaks.append((m, int(open(p).read().strip())))
+    except Exception:
+        pass
 if not peaks:
+    if failed:
+        print()
+        print("    no memory advice: every design failed, and the peak of a run")
+        print("    that died in its first step measures nothing")
     sys.exit()
 peaks.sort(key=lambda x: -x[1])
 print()
@@ -1158,10 +1185,13 @@ worst = peaks[0][1]
 if total_kb:
     # Leave a quarter of the node for everything else; ABC's peak is brief but
     # the OOM killer does not care how brief it was.
-    fits = max(1, int((total_kb * 0.75) // worst))
+    # Never advise more jobs than there are cores to run them on: past that
+    # the answer is bounded by CPU, not memory, and a four-digit -j is a sign
+    # the arithmetic has run away rather than a recommendation.
+    fits = max(1, min(int((total_kb * 0.75) // worst), cores))
     print()
-    print("    largest peak %.2f GB, node has %.1f GB -> -j %d is what fits"
-          % (worst / 1048576.0, total_kb / 1048576.0, fits))
+    print("    largest peak %.2f GB, limit %.1f GB, %d cores -> -j %d"
+          % (worst / 1048576.0, total_kb / 1048576.0, cores, fits))
     if fits < jobs:
         print("    this run used -j %d, which is more than that" % jobs)
 PY
