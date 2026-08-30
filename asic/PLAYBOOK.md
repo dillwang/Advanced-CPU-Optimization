@@ -132,11 +132,17 @@ the machine you edit the RTL on. That is the right place for it anyway: the
 point is to arrive with the findings already fixed. Two things soften the
 absence if you do end up needing it remotely:
 
-- The LibreLane install ships Slang itself — that is what `USE_SLANG` runs. If
-  a `slang` executable is on `PATH` inside the devshell, drive that instead of
-  the Python module; same arguments, same answer. Build the checker so either
-  backend works from one argv.
-- Failing that, the regex fallback needs nothing but Python.
+- **Do not expect a `slang` binary on the remote machine.** yosys-slang is a
+  Yosys *plugin* that LibreLane loads as `read_slang`, not a standalone CLI;
+  bare yosys in the devshell does not have the command. Support a binary
+  backend anyway — it costs one subprocess call and some builds do ship one —
+  but do not plan around it.
+- On the machine that runs the flow, **`--synth-only` is the yosys-slang test.**
+  Its frontend step is the first thing the flow does and it fails in seconds.
+  A separate pre-flight there buys almost nothing; the pre-flight exists for the
+  machine that cannot run the flow at all.
+- The regex fallback needs nothing but Python and is the only thing that covers
+  the mixed-assignment class anywhere.
 
 Never print `pip install …` as advice on a machine that has no pip. It reads as
 a fix and is a dead end.

@@ -588,10 +588,12 @@ do_check() {
 	[ -f "$HERE/src/sram_sky130.v" ] &&
 		args+=(--sram-verilog "$HERE/src/sram_sky130.v")
 	[ -n "$PDK_ROOT" ] && args+=(--pdk-root "$PDK_ROOT" --pdk "$PDK")
-	# Three ways to get the real front end, in order of what is likely to be
-	# present. nanoHUB has no pip, so pyslang cannot be installed there -- but
-	# the LibreLane install ships Slang itself, since that is what USE_SLANG
-	# runs, and a `slang` on PATH inside the devshell answers the same question.
+	# pyslang where pip exists. A `slang` executable is also accepted, but do
+	# not expect one on nanoHUB: yosys-slang is a Yosys plugin that LibreLane
+	# loads itself (`read_slang`), not a standalone CLI, and bare yosys in the
+	# devshell does not have the command. On that machine --synth-only is the
+	# yosys-slang test -- 01-yosys-jsonheader is where it runs, and it fails
+	# fast.
 	local how=""
 	if "$PY" -c 'import pyslang' 2>/dev/null; then
 		how="pyslang $("$PY" -c 'import pyslang; print(pyslang.VersionInfo.getMajor())' 2>/dev/null)"
@@ -606,9 +608,10 @@ do_check() {
 	# Do not tell someone to pip install on a machine without pip. The check is
 	# a pre-flight: the place to run it is wherever you edit the RTL.
 	warn "no Slang here -- neither the pyslang module nor a slang executable.
-     This is the regex lint, which catches less. Run ./rtl2gds.sh check on the
-     machine you edit the RTL on, where pip install pyslang works, and come
-     here with the findings already fixed."
+     This is the regex lint, which catches less. Expected on nanoHUB: yosys-slang
+     is a plugin LibreLane loads, not a CLI. Run ./rtl2gds.sh check where you
+     edit the RTL, and treat --synth-only here as the real front end test --
+     01-yosys-jsonheader is the step that runs it, and it fails fast."
 	"$PY" "$HERE/scripts/slang_lint.py" "${SV_FILES[@]}"
 }
 
