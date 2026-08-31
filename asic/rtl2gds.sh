@@ -944,7 +944,13 @@ harden() {
 # 90% of the machine's non-cache state out of the top-level run. rename_rob is
 # the opposite -- 2,410 port bits guarding ~10,000 flops -- and hardening it
 # would cost area and cross-boundary timing for nothing.
-HIER_CUTS_DEFAULT="statistical_corrector tage_m1"
+# frontend is in the list because it is the only other child of mips_core that
+# can be a top-level design at all -- every one of the rest (d_cache, i_cache,
+# ooo_backend, memory_arbiter, d_prefetcher, stream_buffer) has interface ports
+# and must be flattened into the top no matter what. So the cut set is not a
+# judgement call so much as the whole of what is available, and it happens to
+# carry the predictor, which is the bulk of the machine.
+HIER_CUTS_DEFAULT="statistical_corrector tage_m1 frontend"
 
 do_hier() {
 	local top="${1:-mips_core}"
@@ -970,6 +976,20 @@ do_hier() {
 		# routing layer short of the top. Otherwise it fills met5 with its own
 		# nets, and the parent has nothing left to route over it on -- and the
 		# PDN wants met5 for straps besides. Only the top gets every layer.
+		# Already done in an earlier session? Adopt it and move on. Hardening
+		# a block is hours, the chain is days, and nobody can hold a machine
+		# open that long -- so the run has to be able to stop anywhere and pick
+		# up where it left off. Delete results/<module> to force a rebuild.
+		if [ "$m" != "$top" ] && [ -f "$RESULTS/$m/$m.lef" ]; then
+			MACRO_OF["$m"]="$RESULTS/$m"
+			ok "$m: already hardened, using $RESULTS/$m/$m.lef"
+			continue
+		fi
+		if [ "$m" = "$top" ] && [ -f "$RESULTS/$m/$m.gds" ]; then
+			ok "$m: already hardened, $RESULTS/$m/$m.gds"
+			continue
+		fi
+
 		if [ "$m" = "$top" ]; then
 			MOD_MAX_LAYER="$MAX_LAYER"
 		else
