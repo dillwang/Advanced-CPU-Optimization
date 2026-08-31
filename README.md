@@ -76,7 +76,12 @@ Sizing, all in `mips_core_pkg.sv`:
 **All architectural state changes at commit** — register map, physical register freeing, stores
 reaching the cache, and the simulation event stream. A squashed instruction is never observable.
 
-The in-order RTL is still in the tree (`fetch_unit.sv`, `forward_unit.sv`, `hazard_controller.sv`,
+The baseline it replaces is the classic five-stage in-order pipeline with a forwarding unit, hazard
+controller, split I/D caches and an AXI arbiter:
+
+![baseline in-order pipeline](https://github.com/user-attachments/assets/92958813-c3e5-4a26-98b2-04022365c847)
+
+That RTL is still in the tree (`fetch_unit.sv`, `forward_unit.sv`, `hazard_controller.sv`,
 `pipeline_registers.sv`, `reg_file.sv`, `branch_controller.sv`) but is not built;
 `mips_cpu/verilator_files` selects the OoO core.
 
@@ -158,9 +163,18 @@ Cycle counts are 3-wide; the comparison is what the table is for.
 1.027× geometric mean over tournament, of which the corrector is 1.013×. Going 4-wide later moved
 nqueens 80.58% → 80.44% — a wider front end predicts from history that has had less time to settle.
 
-Tournament components (tournament / perceptron alone / gshare): nqueens 76.3 / 77.3 / 66.9,
-quickSort 86.7 / 86.6 / 83.5, esift2 98.6 / 98.6 / 98.3. The chooser is a near-wash; gshare is the
-weaker half throughout.
+The tournament baseline is a perceptron
+([Jimenez and Lin](https://www.cs.utexas.edu/~lin/papers/hpca01.pdf)) and a gshare running in
+parallel behind a per-pc chooser — 1024 perceptrons × 17 weights of 8 bits, 16 bits of global
+history, a 1024-entry gshare table and a 1024-entry chooser:
+
+![perceptron predictor](https://github.com/user-attachments/assets/a88fff39-ef96-4a6d-b27d-6a73976f5192)
+
+![tournament chooser](https://github.com/user-attachments/assets/949eee24-9657-49f6-9703-cefa054b7aa6)
+
+Its components (tournament / perceptron alone / gshare): nqueens 76.3 / 77.3 / 66.9, quickSort
+86.7 / 86.6 / 83.5, esift2 98.6 / 98.6 / 98.3. The chooser is a near-wash; gshare is the weaker half
+throughout.
 
 ### Two implementation defects worth recording
 
@@ -210,8 +224,13 @@ branch carried.
 
 ## Register renaming
 
-MIPS R10000 structure: register map, free list, busy table, ROB as the active list. Physical
-register 0 is never allocated and reads as a hard zero; the decoder clears `uses_r*` for
+MIPS R10000 structure: register map, free list, busy table, ROB as the active list.
+
+![register renaming](https://github.com/user-attachments/assets/08b2c3e7-3301-4921-99dd-292728afd216)
+
+![rename recovery](https://github.com/user-attachments/assets/ebead8e1-23b0-4016-b5b0-e7a66c4efb3f)
+
+Physical register 0 is never allocated and reads as a hard zero; the decoder clears `uses_r*` for
 architectural zero, so every unused operand renames to that tag and needs no special case.
 
 **Misprediction recovery walks the ROB rather than keeping a branch stack.** Squashed entries are
@@ -350,6 +369,13 @@ esift2's D-cache miss cycles fall 9,754,499 → 85,357 (**114×**); nqueens' I-c
 742,759 → 16,807. Both crossed a working-set cliff rather than improving gradually. Replacement had
 to change with associativity — one `lru_rp` bit is exact LRU for two ways and meaningless for four,
 so it is now a per-set recency permutation with invalid ways preferred.
+
+A Jouppi-style **stream buffer** sits beside the I-cache on its own read id, keeping a window of
+consecutive lines ahead of the pc with up to four requests in flight — a single outstanding request
+would put it only one line ahead, which is no cover against a hundred-cycle miss. A restart bumps a
+generation counter and replies whose generation no longer matches are dropped on arrival.
+
+![instruction stream buffer](https://github.com/user-attachments/assets/d619eeec-c238-4fb5-b9d0-15bc34627fa6)
 
 **Eight-word instruction lines** at the same 8 KB (2 ways × 128 sets) went the *opposite* way to
 intuition: halving the set count should cost hit rate, but nqueens' I-cache misses fell 16,814 →
