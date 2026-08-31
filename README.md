@@ -47,18 +47,70 @@ changes and neither front-end one.
 
 ## Architecture
 
+```mermaid
+flowchart TD
+    subgraph FE["FRONT END — in order, 4 wide"]
+        direction TB
+        PC["PC"]
+        BTB["BTB<br>512 entries"]
+        TAGE["TAGE-SC-L<br>6 x 1024 sets x 4 ways<br>+ statistical corrector"]
+        IC["I-cache<br>8 KB, 2-way, 8-word lines"]
+        SB["stream buffer<br>next-line, 4 in flight"]
+        FB["fetch buffer<br>32 entries"]
+        DEC["decode x4"]
+        RN["rename + dispatch<br>map, free list, busy table"]
+        PC --> BTB
+        PC --> IC
+        BTB --> NPC{"taken?"}
+        TAGE --> NPC
+        NPC -- next pc --> PC
+        SB -. fill .-> IC
+        IC --> FB
+        FB --> DEC
+        DEC --> RN
+    end
+
+    subgraph OOO["OUT OF ORDER"]
+        direction TB
+        IQ["issue queue<br>32 entries<br>oldest-ready-first"]
+        ALU["4 ALUs<br>single cycle"]
+        PRF["physical registers<br>128 x 32, 8 read, 5 write"]
+        LSQ["load/store queue<br>32 entries<br>forwarding, disambiguation"]
+        IQ --> ALU
+        IQ --> LSQ
+        PRF --> ALU
+        ALU --> PRF
+        ALU -- wakeup --> IQ
+    end
+
+    subgraph MEM["MEMORY"]
+        direction TB
+        DC["D-cache<br>32 KB, 4-way, 8-word lines<br>non-blocking, 8 MSHRs, 2 AXI ids"]
+        PFE["data prefetcher<br>64 lines, spatial + temporal"]
+        ARB["AXI arbiter<br>5 read masters"]
+        PFE -. fill .-> DC
+        DC --> ARB
+        PFE --> ARB
+    end
+
+    ROB["reorder buffer — 128 entries"]
+    CM["COMMIT — in order, 4 wide<br>arch map, free list, stores, trace"]
+
+    RN --> IQ
+    RN --> ROB
+    LSQ --> DC
+    IC --> ARB
+    SB --> ARB
+    ALU --> ROB
+    ROB --> CM
+    CM -- store --> DC
+    CM -- squash --> PC
+    LSQ -- order violation --> CM
+    CM -- train --> TAGE
 ```
-        in order                          out of order                      in order
- ┌───────────────────────┐   ┌────────────────────────────────────┐   ┌──────────────┐
- │ FETCH + PREDICT (BTB) │   │            issue queue             │   │              │
- │   ↓                   │──▶│         (32 entries, oldest-       │──▶│   COMMIT     │
- │ fetch buffer → DECODE │   │          ready-first select)       │   │  (in order,  │
- │   ↓                   │   │                 ↓                  │   │   4 wide)    │
- │ RENAME + DISPATCH     │   │   4 ALUs   +   load/store queue     │   │              │
- └───────────────────────┘   │                 ↓                  │   └──────────────┘
-            │                │            writeback               │          ▲
-            └────────────────┴─── reorder buffer (128 entries) ────┴──────────┘
-```
+
+Everything between dispatch and writeback runs out of order, bounded by the issue queue and the
+reorder buffer. The front end, rename and commit are all in program order.
 
 Sizing, all in `mips_core_pkg.sv`:
 
