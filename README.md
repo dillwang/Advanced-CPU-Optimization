@@ -50,19 +50,24 @@ changes and neither front-end one.
 ```mermaid
 flowchart TD
     subgraph FE["FRONT END — in order, 4 wide"]
-        direction LR
+        direction TB
         PC["PC"]
         BTB["BTB<br>512 entries"]
         TAGE["TAGE-SC-L<br>6 x 1024 sets x 4 ways<br>+ statistical corrector"]
-        IC["I-cache<br>8 KB, 2-way, 8-word lines<br>stream buffer, 4 in flight"]
+        IC["I-cache<br>8 KB, 2-way, 8-word lines"]
+        SB["stream buffer<br>next-line, 4 in flight"]
         FB["fetch buffer<br>32 entries"]
-        RN["decode, rename, dispatch x4<br>map, free list, busy table"]
+        DEC["decode x4"]
+        RN["rename + dispatch<br>map, free list, busy table"]
         PC --> BTB
         PC --> IC
-        BTB -- target --> PC
-        TAGE -- direction --> PC
+        BTB --> NPC{"taken?"}
+        TAGE --> NPC
+        NPC -- next pc --> PC
+        SB -. fill .-> IC
         IC --> FB
-        FB --> RN
+        FB --> DEC
+        DEC --> RN
     end
 
     subgraph OOO["OUT OF ORDER"]
@@ -95,6 +100,7 @@ flowchart TD
     RN --> ROB
     LSQ --> DC
     IC --> ARB
+    SB --> ARB
     ALU --> ROB
     ROB --> CM
     CM -- store --> DC
