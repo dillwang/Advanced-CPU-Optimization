@@ -49,64 +49,66 @@ changes and neither front-end one.
 
 ```mermaid
 flowchart TD
-    subgraph FE["FRONT END — in order, 4 wide"]
-        direction TB
+    subgraph FETCH["1 · FETCH AND PREDICT"]
+        direction LR
         PC["PC"]
         BTB["BTB<br>512 entries"]
         TAGE["TAGE-SC-L<br>6 x 1024 sets x 4 ways<br>+ statistical corrector"]
         IC["I-cache<br>8 KB, 2-way, 8-word lines"]
         SB["stream buffer<br>next-line, 4 in flight"]
         FB["fetch buffer<br>32 entries"]
-        DEC["decode x4"]
-        RN["rename + dispatch<br>map, free list, busy table"]
         PC --> BTB
         PC --> IC
-        BTB --> NPC{"taken?"}
-        TAGE --> NPC
-        NPC -- next pc --> PC
+        BTB -- target --> PC
+        TAGE -- direction --> PC
         SB -. fill .-> IC
         IC --> FB
-        FB --> DEC
-        DEC --> RN
     end
 
-    subgraph OOO["OUT OF ORDER"]
-        direction TB
+    subgraph RENAME["2 · DECODE, RENAME, DISPATCH · 4 wide"]
+        direction LR
+        DEC["decode x4"]
+        MAP["register map<br>free list, busy table"]
+        DEC --> MAP
+    end
+
+    subgraph EXEC["3 · ISSUE AND EXECUTE · out of order"]
+        direction LR
         IQ["issue queue<br>32 entries<br>oldest-ready-first"]
         ALU["4 ALUs<br>single cycle"]
-        PRF["physical registers<br>128 x 32, 8 read, 5 write"]
-        LSQ["load/store queue<br>32 entries<br>forwarding, disambiguation"]
+        PRF["physical registers<br>128 x 32<br>8 read, 5 write"]
         IQ --> ALU
-        IQ --> LSQ
-        PRF --> ALU
         ALU --> PRF
+        PRF --> ALU
         ALU -- wakeup --> IQ
     end
 
-    subgraph MEM["MEMORY"]
-        direction TB
-        DC["D-cache<br>32 KB, 4-way, 8-word lines<br>non-blocking, 8 MSHRs, 2 AXI ids"]
+    subgraph MEMORY["4 · MEMORY"]
+        direction LR
+        LSQ["load/store queue<br>32 entries<br>forwarding, disambiguation"]
+        DC["D-cache<br>32 KB, 4-way, 8-word lines<br>non-blocking, 8 MSHRs"]
         PFE["data prefetcher<br>64 lines, spatial + temporal"]
-        ARB["AXI arbiter<br>5 read masters"]
+        LSQ --> DC
         PFE -. fill .-> DC
-        DC --> ARB
-        PFE --> ARB
     end
 
-    ROB["reorder buffer — 128 entries"]
-    CM["COMMIT — in order, 4 wide<br>arch map, free list, stores, trace"]
+    subgraph COMMIT["5 · COMMIT · in order, 4 wide"]
+        direction LR
+        ROB["reorder buffer<br>128 entries"]
+        ARCH["arch map, free list<br>stores, event trace"]
+        ROB --> ARCH
+    end
 
-    RN --> IQ
-    RN --> ROB
-    LSQ --> DC
-    IC --> ARB
-    SB --> ARB
-    ALU --> ROB
-    ROB --> CM
-    CM -- store --> DC
-    CM -- squash --> PC
-    LSQ -- order violation --> CM
-    CM -- train --> TAGE
+    ARB["AXI arbiter · 5 read masters"]
+
+    FETCH ==> RENAME
+    RENAME ==> EXEC
+    EXEC ==> MEMORY
+    EXEC ==> COMMIT
+    MEMORY ==> COMMIT
+    COMMIT -. squash and train .-> FETCH
+    FETCH --> ARB
+    MEMORY --> ARB
 ```
 
 Everything between dispatch and writeback runs out of order, bounded by the issue queue and the
